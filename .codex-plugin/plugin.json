@@ -1,0 +1,36 @@
+{
+  "name": "hyperagent-codex-bridge",
+  "version": "0.4.0",
+  "description": "Route Codex CLI and Codex App reasoning through named Hyperagent agents using Hyperagent credits while Codex keeps local tools and approvals.",
+  "author": {
+    "name": "Clutch Foundation",
+    "email": "clutchpbcfo@gmail.com",
+    "url": "https://reachfi.network"
+  },
+  "homepage": "https://github.com/clutchpbcfo/hyperagent-codex-bridge",
+  "repository": "https://github.com/clutchpbcfo/hyperagent-codex-bridge",
+  "license": "MIT",
+  "keywords": [
+    "hyperagent",
+    "codex",
+    "oauth",
+    "llm-router",
+    "model-provider",
+    "developer-tools"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hyperagent Codex Bridge",
+    "shortDescription": "Use Hyperagent credits and models from Codex",
+    "longDescription": "Install, verify, switch, audit, and troubleshoot the Hyperagent Codex Bridge across Codex CLI and Codex App without exposing OAuth tokens or replacing Codex's local tool and approval layer.",
+    "developerName": "Clutch Foundation",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "Set up Hyperagent Codex Bridge on this machine.",
+      "Switch Codex App to Hyperagent credits safely.",
+      "Audit whether recent Codex turns used Hyperagent.",
+      "Restore normal Codex subscription defaults."
+    ],
+    "brandColor": "#7C3AED"
+  }
+}

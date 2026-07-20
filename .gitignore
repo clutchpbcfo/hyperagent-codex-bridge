@@ -1,0 +1,25 @@
+node_modules/
+coverage/
+.DS_Store
+*.log
+*.tmp
+*.swp
+.env
+.env.*
+
+# Machine-local Hyperagent/Codex credentials and generated state
+.hyperagent-codex-bridge/
+state.json
+config.local.json
+audit.jsonl
+bridge.pid
+bridge.log
+auth.json
+hyperagent.config.toml
+config.toml.hacb-app-backup*
+models.json
+
+# Release archives
+*.zip
+*.tgz
+*.sha256
