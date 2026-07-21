@@ -28,6 +28,11 @@ v0.4.0 forwarded large Codex App developer, skills, environment, and AGENTS payl
 4. Run `hacb budget` and a single controlled test.
 5. Review `hacb audit` and Hyperagent credit usage before enabling App Mode again.
 
+## Downloads
+
+- ZIP: https://pub.hyperagent.com/api/published/pbf01KY113X74_6VET28JJ1EW8HQ3Y/hyperagent-codex-bridge-0.4.1.zip
+- SHA-256: https://pub.hyperagent.com/api/published/pbf01KY113X7F_N3C8P93EZF3ZAEG7/hyperagent-codex-bridge-0.4.1.sha256
+
 ## Security
 
 No prompts, answers, OAuth tokens, refresh tokens, or local bearer tokens are stored in audit receipts or included in the repository.

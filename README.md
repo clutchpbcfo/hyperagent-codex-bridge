@@ -42,8 +42,8 @@ The public proof target is `hacb audit`: each successful turn produces model and
 ## Public release
 
 - Source: <https://github.com/clutchpbcfo/hyperagent-codex-bridge>
-- v0.4.0 ZIP: <https://pub.hyperagent.com/api/published/pbf01KY0PQYDC_R4GR7YQZWJEVJ4CZ/hyperagent-codex-bridge-0.4.0.zip>
-- SHA-256: <https://pub.hyperagent.com/api/published/pbf01KY0PQYDQ_9S962DWX4ZA0TPRV/hyperagent-codex-bridge-0.4.0.sha256>
+- v0.4.1 ZIP: <https://pub.hyperagent.com/api/published/pbf01KY113X74_6VET28JJ1EW8HQ3Y/hyperagent-codex-bridge-0.4.1.zip>
+- SHA-256: <https://pub.hyperagent.com/api/published/pbf01KY113X7F_N3C8P93EZF3ZAEG7/hyperagent-codex-bridge-0.4.1.sha256>
 
 ## Requirements
 
