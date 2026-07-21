@@ -85,7 +85,7 @@ The audit file never stores prompts, outputs, OAuth tokens, refresh tokens, or t
 
 The live v0.4.0 trial revealed unacceptable credit consumption. Root cause analysis found that each Codex App turn could forward tens of thousands of characters of injected app, skills, environment, and AGENTS context into a high-effort Hyperagent run. Codex tool loops create multiple sampling requests per user turn, multiplying the cost. v0.4.0 also lacked a local daily ceiling.
 
-v0.4.1 remediates this with context stripping, bounded recent history, low-effort defaults, a 20-request persistent daily cap, prompt/tool ceilings, multi-agent blocking, and budget visibility. Production use also requires a hard per-run budget on the relay agent itself.
+v0.4.1 remediates this with context stripping, bounded recent history, low-effort defaults, a six-request persistent daily cap, prompt/tool ceilings, multi-agent blocking, and budget visibility. Production use also requires a hard per-run budget on the relay agent itself.
 
 ## Honest limitations
 

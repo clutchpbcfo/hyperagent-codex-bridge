@@ -186,7 +186,7 @@ CLI mode leaves `~/.codex/config.toml` defaults untouched and uses `~/.codex/hyp
 v0.4.1 fails closed by default:
 
 - low reasoning effort;
-- 20 Hyperagent sampling requests per UTC day;
+- six Hyperagent sampling requests per UTC day;
 - 24,000 retained conversation characters;
 - 6,000 characters per retained turn;
 - eight retained turns;

@@ -63,7 +63,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   localApiToken: null,
   defaultReasoningEffort: 'low',
   allowClientReasoningEffort: false,
-  maxRequestsPerDay: 20,
+  maxRequestsPerDay: 6,
   maxInputChars: 24000,
   maxTurnChars: 6000,
   maxConversationTurns: 8,
@@ -150,7 +150,7 @@ let budgetQueue = Promise.resolve();
 
 export function consumeDailyRequestBudget(config) {
   const run = budgetQueue.then(async () => {
-    const limit = Math.max(1, Number(config.maxRequestsPerDay || 20));
+    const limit = Math.max(1, Number(config.maxRequestsPerDay || 6));
     const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
     if (current.day !== utcDay()) {
       current.day = utcDay();
@@ -168,7 +168,7 @@ export function consumeDailyRequestBudget(config) {
 }
 
 export async function getDailyBudgetStatus(config) {
-  const limit = Math.max(1, Number(config.maxRequestsPerDay || 20));
+  const limit = Math.max(1, Number(config.maxRequestsPerDay || 6));
   const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
   const used = current.day === utcDay() ? Number(current.used || 0) : 0;
   return { day: utcDay(), used, limit, remaining: Math.max(0, limit - used) };

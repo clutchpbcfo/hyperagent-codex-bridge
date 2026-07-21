@@ -13,7 +13,7 @@ v0.4.0 forwarded large Codex App developer, skills, environment, and AGENTS payl
 - Cap each retained turn at 6,000 characters and the final relay prompt at 70,000 characters.
 - Limit forwarded tools to 32.
 - Default to low reasoning effort and ignore client effort escalation unless explicitly enabled.
-- Add a persistent 20-request UTC daily ceiling and `hacb budget` command.
+- Add a persistent six-request UTC daily ceiling and `hacb budget` command.
 - Block multi-agent delegation tools by default.
 - Read Codex `additional_tools` and `tool_search_output` tool declarations.
 - Flatten MCP namespaces such as `mcp__node_repl__js` into callable function names.
