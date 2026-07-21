@@ -58,12 +58,11 @@ export function modelInfo(item) {
     slug: item.slug,
     display_name: item.displayName,
     description: item.agent.description || `Hyperagent agent: ${item.agent.name}`,
-    default_reasoning_level: 'medium',
+    default_reasoning_level: 'low',
     supported_reasoning_levels: [
-      { effort: 'low', description: 'Lower latency' },
-      { effort: 'medium', description: 'Balanced' },
-      { effort: 'high', description: 'Deeper reasoning' },
-      { effort: 'xhigh', description: 'Maximum reasoning' }
+      { effort: 'low', description: 'Cost-controlled default' },
+      { effort: 'medium', description: 'Use only when the task needs more depth' },
+      { effort: 'high', description: 'Explicit opt-in for difficult tasks' }
     ],
     shell_type: 'shell_command',
     visibility: 'list',
@@ -114,70 +113,160 @@ function contentToText(content) {
     .join('\n');
 }
 
-function normalizeInput(input) {
-  if (typeof input === 'string') return [{ role: 'user', text: input }];
-  if (!Array.isArray(input)) return [{ role: 'user', text: JSON.stringify(input ?? '') }];
-  return input.map(item => {
+function injectedContext(text, role) {
+  const value = String(text || '').trimStart();
+  if (role === 'developer' || role === 'system') return true;
+  return [
+    '<environment_context>',
+    '<permissions instructions>',
+    '<app-context>',
+    '<collaboration_mode>',
+    '<apps_instructions>',
+    '<plugins_instructions>',
+    '<skills_instructions>',
+    '<skill>',
+    '# AGENTS.md instructions for '
+  ].some(prefix => value.startsWith(prefix));
+}
+
+function compact(value, limit) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n[truncated by Hyperagent Codex Bridge]`;
+}
+
+function normalizeInput(input, config = {}) {
+  if (typeof input === 'string') return [{ role: 'user', text: compact(input, 12000) }];
+  if (!Array.isArray(input)) return [{ role: 'user', text: compact(input, 12000) }];
+  const perTurnLimit = Math.max(1000, Number(config.maxTurnChars || 12000));
+  const maxTurns = Math.max(2, Number(config.maxConversationTurns || 12));
+  const maxTotal = Math.max(perTurnLimit, Number(config.maxInputChars || 48000));
+  const turns = [];
+  for (const item of input) {
     const type = item?.type || 'message';
+    if (type === 'additional_tools') continue;
     if (type === 'message') {
-      return { role: item.role || 'user', text: contentToText(item.content) };
+      const role = item.role || 'user';
+      const text = contentToText(item.content);
+      if (injectedContext(text, role)) continue;
+      turns.push({ role, text: compact(text, perTurnLimit) });
+      continue;
     }
     if (type === 'function_call') {
-      return {
-        role: 'assistant_tool_call',
-        text: JSON.stringify({ call_id: item.call_id, name: item.name, arguments: item.arguments })
-      };
+      turns.push({ role: 'assistant_tool_call', text: compact({ call_id: item.call_id, name: item.name, namespace: item.namespace, arguments: item.arguments }, perTurnLimit) });
+      continue;
     }
     if (type === 'function_call_output') {
-      return {
-        role: 'tool_result',
-        text: JSON.stringify({ call_id: item.call_id, output: item.output })
-      };
+      turns.push({ role: 'tool_result', text: compact({ call_id: item.call_id, output: item.output }, perTurnLimit) });
+      continue;
     }
     if (type === 'custom_tool_call') {
-      return {
-        role: 'assistant_custom_tool_call',
-        text: JSON.stringify({ call_id: item.call_id, name: item.name, input: item.input })
-      };
+      turns.push({ role: 'assistant_custom_tool_call', text: compact({ call_id: item.call_id, name: item.name, namespace: item.namespace, input: item.input }, perTurnLimit) });
+      continue;
     }
     if (type === 'custom_tool_call_output') {
-      return {
-        role: 'custom_tool_result',
-        text: JSON.stringify({ call_id: item.call_id, output: item.output })
-      };
+      turns.push({ role: 'custom_tool_result', text: compact({ call_id: item.call_id, output: item.output }, perTurnLimit) });
+      continue;
     }
-    return { role: type, text: JSON.stringify(item) };
-  });
+    if (type === 'tool_search_call') {
+      turns.push({ role: 'assistant_tool_search', text: compact({ call_id: item.call_id, arguments: item.arguments }, perTurnLimit) });
+      continue;
+    }
+    if (type === 'tool_search_output') {
+      turns.push({ role: 'tool_search_result', text: compact({ call_id: item.call_id, status: item.status, tools: item.tools }, perTurnLimit) });
+    }
+  }
+  const recent = turns.slice(-maxTurns);
+  const bounded = [];
+  let used = 0;
+  for (let index = recent.length - 1; index >= 0; index -= 1) {
+    const turn = recent[index];
+    if (used + turn.text.length > maxTotal && bounded.length) break;
+    bounded.unshift(turn);
+    used += turn.text.length;
+  }
+  return bounded;
 }
 
-function normalizeTools(tools) {
+function namespaceToolName(namespace, child) {
+  if (namespace.endsWith('__')) return `${namespace}${child}`;
+  if (namespace.startsWith('mcp__')) return `${namespace}__${child}`;
+  return `${namespace}.${child}`;
+}
+
+function blockedTool(name, config) {
+  if (!config.blockMultiAgentTools) return false;
+  return /(^|[._])(?:spawn_agent|send_input|wait_agent|close_agent|resume_agent)$/.test(name)
+    || name === 'collaboration'
+    || name.startsWith('multi_agent');
+}
+
+function normalizeTools(tools, config = {}) {
   if (!Array.isArray(tools)) return [];
-  return tools.map(tool => {
+  const normalized = [];
+  const add = tool => {
+    if (!tool?.name || blockedTool(tool.name, config)) return;
+    if (normalized.some(existing => existing.name === tool.name && existing.type === tool.type)) return;
+    normalized.push(tool);
+  };
+  for (const tool of tools) {
+    if (tool?.type === 'namespace' && Array.isArray(tool.tools)) {
+      if (blockedTool(tool.name || '', config)) continue;
+      for (const child of tool.tools) {
+        if (child?.type !== 'function') continue;
+        const name = namespaceToolName(tool.name, child.name);
+        add({
+          type: 'function',
+          name,
+          description: compact(child.description || tool.description || '', 800),
+          parameters: child.parameters || child.input_schema || { type: 'object' }
+        });
+      }
+      continue;
+    }
     if (tool?.type === 'function') {
-      return {
+      add({
         type: 'function',
         name: tool.name,
-        description: tool.description || '',
+        description: compact(tool.description || '', 800),
         parameters: tool.parameters || tool.input_schema || { type: 'object' }
-      };
+      });
+      continue;
     }
     if (tool?.type === 'custom') {
-      return {
+      add({
         type: 'custom',
         name: tool.name,
-        description: tool.description || '',
+        description: compact(tool.description || '', 800),
         format: tool.format || null
-      };
+      });
+      continue;
     }
-    return tool;
-  });
+    if (tool?.type === 'tool_search') {
+      add({ type: 'tool_search', name: 'tool_search', description: compact(tool.description || 'Search deferred client tools.', 800), execution: tool.execution || 'client' });
+    }
+  }
+  return normalized.slice(0, Math.max(4, Number(config.maxForwardedTools || 64)));
 }
 
-export function buildRelayPrompt(body, agent) {
-  const turns = normalizeInput(body.input);
-  const tools = normalizeTools(body.tools);
-  const instructions = typeof body.instructions === 'string' ? body.instructions : '';
-  const effort = body.reasoning?.effort || 'medium';
+export function extractClientTools(body, config = {}) {
+  const tools = Array.isArray(body?.tools) ? [...body.tools] : [];
+  if (Array.isArray(body?.input)) {
+    for (const item of body.input) {
+      if (item?.type === 'additional_tools' && Array.isArray(item.tools)) tools.push(...item.tools);
+      if (item?.type === 'tool_search_output' && Array.isArray(item.tools)) tools.push(...item.tools);
+    }
+  }
+  return normalizeTools(tools, config);
+}
+
+export function buildRelayPrompt(body, agent, config = {}, extractedTools = null) {
+  const turns = normalizeInput(body.input, config);
+  const tools = extractedTools || extractClientTools(body, config);
+  const instructions = 'Act as the Codex reasoning backend. Use only the forwarded client tools and return one compact JSON action.';
+  const effort = config.allowClientReasoningEffort && body.reasoning?.effort
+    ? body.reasoning.effort
+    : (config.defaultReasoningEffort || 'low');
   const payload = {
     task: 'Act as the reasoning/model backend for a local Codex coding session.',
     selected_hyperagent_agent: agent.name,
@@ -194,6 +283,7 @@ export function buildRelayPrompt(body, agent) {
     '{"type":"final","text":"your final answer"}',
     '{"type":"function_call","name":"one exact function tool name","arguments":{}}',
     '{"type":"custom_tool_call","name":"one exact custom tool name","input":"raw tool input"}',
+    '{"type":"tool_search_call","arguments":{"query":"tool capability to find"}}',
     'If client_tools is non-empty and local inspection, editing, commands, or tests are required, call the matching client tool instead of claiming you performed the work.',
     'Never invent a tool name. Never execute an equivalent remote tool when the request concerns Codex local files.',
     'After a tool result appears in conversation, either call another client tool or return final.',
@@ -238,6 +328,11 @@ export function parseRelayOutput(text, tools = []) {
     if (!tool) return { type: 'final', text: `Hyperagent requested unavailable custom tool '${parsed.name}'.\n\n${text}` };
     return { type: 'custom_tool_call', name: parsed.name, input: String(parsed.input || '') };
   }
+  if (parsed.type === 'tool_search_call' || parsed.type === 'tool_search') {
+    const tool = tools.find(item => item?.type === 'tool_search');
+    if (!tool) return { type: 'final', text: `Hyperagent requested unavailable tool_search.\n\n${text}` };
+    return { type: 'tool_search_call', arguments: parsed.arguments || { query: String(parsed.query || '') } };
+  }
   if (parsed.type === 'final' && typeof parsed.text === 'string') return parsed;
   return { type: 'final', text: typeof parsed.text === 'string' ? parsed.text : String(text || '') };
 }
@@ -259,6 +354,11 @@ export function sseEvents(output, ids, { model, threadId } = {}) {
     events.push({
       type: 'response.output_item.done',
       item: { type: 'custom_tool_call', call_id: ids.callId, name: output.name, input: output.input }
+    });
+  } else if (output.type === 'tool_search_call') {
+    events.push({
+      type: 'response.output_item.done',
+      item: { type: 'tool_search_call', call_id: ids.callId, status: 'completed', execution: 'client', arguments: output.arguments }
     });
   } else {
     events.push({
@@ -289,7 +389,9 @@ export function nonStreamingResponse(output, ids, { model, threadId } = {}) {
     ? { type: 'function_call', call_id: ids.callId, name: output.name, arguments: output.arguments }
     : output.type === 'custom_tool_call'
       ? { type: 'custom_tool_call', call_id: ids.callId, name: output.name, input: output.input }
-      : { type: 'message', role: 'assistant', id: ids.itemId, content: [{ type: 'output_text', text: output.text || '' }] };
+      : output.type === 'tool_search_call'
+        ? { type: 'tool_search_call', call_id: ids.callId, status: 'completed', execution: 'client', arguments: output.arguments }
+        : { type: 'message', role: 'assistant', id: ids.itemId, content: [{ type: 'output_text', text: output.text || '' }] };
   return {
     id: ids.responseId,
     object: 'response',

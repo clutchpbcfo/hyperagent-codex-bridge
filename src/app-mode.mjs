@@ -129,7 +129,7 @@ function activeBlock(config, model) {
     `model = ${tomlString(model)}`,
     `model_provider = ${tomlString(config.codexProviderId)}`,
     `model_catalog_json = ${tomlString(modelCatalogPath())}`,
-    'model_reasoning_effort = "medium"',
+    'model_reasoning_effort = "low"',
     ACTIVE_END
   ].join('\n');
 }

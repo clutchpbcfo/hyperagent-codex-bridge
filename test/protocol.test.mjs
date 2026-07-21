@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildAgentModels,
   buildRelayPrompt,
+  extractClientTools,
   modelInfo,
   parseRelayOutput,
   resolveAgent,
@@ -28,22 +29,48 @@ test('aliases and generated slugs resolve to agents', () => {
   assert.throws(() => resolveAgent('hyperagent/missing', agents, config), /Unknown Hyperagent model/);
 });
 
-test('relay prompt preserves Codex instructions, inputs, tools, and tool results', () => {
+test('relay prompt strips injected context, bounds history, and defaults to low effort', () => {
   const prompt = buildRelayPrompt({
     model: 'hyperagent/sol-coder',
     instructions: 'Work carefully.',
     reasoning: { effort: 'high' },
     input: [
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: '<skills_instructions>huge injected skill inventory</skills_instructions>' }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>private local context</environment_context>' }] },
       { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Inspect the repo.' }] },
       { type: 'function_call_output', call_id: 'call_1', output: 'README contents' }
     ],
     tools: [{ type: 'function', name: 'shell', description: 'Run shell', parameters: { type: 'object' } }]
-  }, agents[0]);
-  assert.match(prompt, /Work carefully/);
+  }, agents[0], { defaultReasoningEffort: 'low', allowClientReasoningEffort: false });
+  assert.doesNotMatch(prompt, /Work carefully/);
+  assert.doesNotMatch(prompt, /skills_instructions/);
+  assert.doesNotMatch(prompt, /private local context/);
   assert.match(prompt, /Inspect the repo/);
   assert.match(prompt, /README contents/);
   assert.match(prompt, /"name":"shell"/);
-  assert.match(prompt, /"reasoning_effort":"high"/);
+  assert.match(prompt, /"reasoning_effort":"low"/);
+});
+
+test('additional_tools and MCP namespaces are flattened while multi-agent tools are blocked', () => {
+  const body = {
+    input: [{
+      type: 'additional_tools',
+      role: 'developer',
+      tools: [
+        { type: 'namespace', name: 'mcp__node_repl__', description: 'Node tools', tools: [{ type: 'function', name: 'js', description: 'Run JS', parameters: { type: 'object' } }] },
+        { type: 'namespace', name: 'multi_agent_v1', description: 'Agents', tools: [{ type: 'function', name: 'spawn_agent', parameters: { type: 'object' } }] },
+        { type: 'tool_search', execution: 'client' }
+      ]
+    }]
+  };
+  const tools = extractClientTools(body, { blockMultiAgentTools: true, maxForwardedTools: 32 });
+  assert.ok(tools.some(tool => tool.name === 'mcp__node_repl__js'));
+  assert.ok(tools.some(tool => tool.type === 'tool_search'));
+  assert.ok(!tools.some(tool => tool.name.includes('spawn_agent')));
+  assert.deepEqual(
+    parseRelayOutput('{"type":"function_call","name":"mcp__node_repl__js","arguments":{"code":"1+1"}}', tools),
+    { type: 'function_call', name: 'mcp__node_repl__js', arguments: '{"code":"1+1"}' }
+  );
 });
 
 test('relay output maps final and tool calls', () => {
@@ -55,6 +82,10 @@ test('relay output maps final and tool calls', () => {
   assert.deepEqual(
     parseRelayOutput('{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch"}', [{ type: 'custom', name: 'apply_patch' }]),
     { type: 'custom_tool_call', name: 'apply_patch', input: '*** Begin Patch' }
+  );
+  assert.deepEqual(
+    parseRelayOutput('{"type":"tool_search_call","arguments":{"query":"Chrome control"}}', [{ type: 'tool_search', name: 'tool_search' }]),
+    { type: 'tool_search_call', arguments: { query: 'Chrome control' } }
   );
   assert.deepEqual(parseRelayOutput('plain answer'), { type: 'final', text: 'plain answer' });
 });
@@ -75,4 +106,12 @@ test('Codex model metadata and SSE fixtures include required fields', () => {
   assert.deepEqual(events.map(event => event.type), ['response.created', 'response.output_item.done', 'response.completed']);
   assert.equal(events[1].item.type, 'function_call');
   assert.equal(events[1].item.call_id, 'call_1');
+
+  const searchEvents = sseEvents(
+    { type: 'tool_search_call', arguments: { query: 'Chrome' } },
+    { responseId: 'resp_2', itemId: 'msg_2', callId: 'call_2' },
+    { model: info.slug, threadId: 'thread_2' }
+  );
+  assert.equal(searchEvents[1].item.type, 'tool_search_call');
+  assert.equal(searchEvents[1].item.execution, 'client');
 });

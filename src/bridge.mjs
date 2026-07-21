@@ -1,10 +1,11 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
-import { appendAudit, VERSION } from './config.mjs';
+import { appendAudit, consumeDailyRequestBudget, VERSION } from './config.mjs';
 import { HyperagentClient } from './hyperagent.mjs';
 import {
   buildAgentModels,
   buildRelayPrompt,
+  extractClientTools,
   modelInfo,
   nonStreamingResponse,
   parseRelayOutput,
@@ -83,12 +84,13 @@ function etagFor(value) {
 }
 
 export class BridgeServer {
-  constructor(config, { clientFactory, auditWriter } = {}) {
+  constructor(config, { clientFactory, auditWriter, budgetGuard } = {}) {
     this.config = config;
     this.server = null;
     this.agentCache = { at: 0, agents: [] };
     this.clientFactory = clientFactory || (() => new HyperagentClient(this.config));
     this.auditWriter = auditWriter || appendAudit;
+    this.budgetGuard = budgetGuard || consumeDailyRequestBudget;
   }
 
   async getAgents({ fresh = false } = {}) {
@@ -133,7 +135,12 @@ export class BridgeServer {
       error.status = 400;
       throw error;
     }
-    const prompt = buildRelayPrompt(body, agent);
+    const budget = await this.budgetGuard(this.config);
+    const tools = extractClientTools(body, this.config);
+    const prompt = buildRelayPrompt(body, agent, this.config, tools);
+    if (prompt.length > Math.max(10000, Number(this.config.maxPromptChars || 70000))) {
+      throw Object.assign(new Error(`Sanitized relay prompt is still too large (${prompt.length} chars). Start a new Codex chat or reduce attached context.`), { status: 413 });
+    }
     const ids = responseIds();
     const client = this.clientFactory();
     const abort = new AbortController();
@@ -145,7 +152,7 @@ export class BridgeServer {
     let threadId;
     let keepalive;
     const streaming = body.stream !== false;
-    await this.auditWriter({ event: 'request', model: body.model, agentId: agent.id, agentName: agent.name, streaming });
+    await this.auditWriter({ event: 'request', model: body.model, agentId: agent.id, agentName: agent.name, streaming, promptChars: prompt.length, toolCount: tools.length, dailyUsed: budget.used, dailyLimit: budget.limit });
     try {
       threadId = await client.createThread(agent.id, prompt);
       await this.auditWriter({ event: 'thread_created', model: body.model, agentId: agent.id, threadId });
@@ -174,7 +181,7 @@ export class BridgeServer {
       }
 
       const result = await client.waitForThread(threadId, { signal: abort.signal });
-      const output = parseRelayOutput(result.text, body.tools || []);
+      const output = parseRelayOutput(result.text, tools);
       await this.auditWriter({ event: 'completed', model: body.model, agentId: agent.id, threadId, outputType: output.type });
       if (streaming) {
         for (const event of sseEvents(output, ids, { model: body.model, threadId }).slice(1)) writeSse(response, event);

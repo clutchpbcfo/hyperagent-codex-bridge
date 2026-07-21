@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 export const APP_NAME = 'hyperagent-codex-bridge';
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.1';
 export const DEFAULT_MCP_URL = 'https://hyperagent.com/api/mcp';
 export const DEFAULT_ISSUER = 'https://hyperagent.com';
 export const DEFAULT_BRIDGE_PORT = 47831;
@@ -38,6 +38,10 @@ export function auditPath() {
   return join(stateDir(), 'audit.jsonl');
 }
 
+export function usagePath() {
+  return join(stateDir(), 'usage.json');
+}
+
 export const DEFAULT_CONFIG = Object.freeze({
   mcpUrl: DEFAULT_MCP_URL,
   issuer: DEFAULT_ISSUER,
@@ -56,7 +60,16 @@ export const DEFAULT_CONFIG = Object.freeze({
   defaultAgentId: null,
   exposeAllAgents: true,
   codexProviderId: 'hyperagent_credits',
-  localApiToken: null
+  localApiToken: null,
+  defaultReasoningEffort: 'low',
+  allowClientReasoningEffort: false,
+  maxRequestsPerDay: 20,
+  maxInputChars: 24000,
+  maxTurnChars: 6000,
+  maxConversationTurns: 8,
+  maxForwardedTools: 32,
+  maxPromptChars: 70000,
+  blockMultiAgentTools: true
 });
 
 export async function ensureStateDir() {
@@ -127,4 +140,36 @@ export async function appendAudit(event) {
   const entry = { at: new Date().toISOString(), ...event };
   await appendFile(path, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
   await chmod(path, 0o600).catch(() => {});
+}
+
+function utcDay() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+let budgetQueue = Promise.resolve();
+
+export function consumeDailyRequestBudget(config) {
+  const run = budgetQueue.then(async () => {
+    const limit = Math.max(1, Number(config.maxRequestsPerDay || 20));
+    const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
+    if (current.day !== utcDay()) {
+      current.day = utcDay();
+      current.used = 0;
+    }
+    if (current.used >= limit) {
+      throw Object.assign(new Error(`Daily Hyperagent request cap reached (${current.used}/${limit}). Raise maxRequestsPerDay explicitly only after reviewing credit usage.`), { status: 429 });
+    }
+    current.used += 1;
+    await atomicWriteJson(usagePath(), current, 0o600);
+    return { day: current.day, used: current.used, limit, remaining: limit - current.used };
+  });
+  budgetQueue = run.catch(() => {});
+  return run;
+}
+
+export async function getDailyBudgetStatus(config) {
+  const limit = Math.max(1, Number(config.maxRequestsPerDay || 20));
+  const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
+  const used = current.day === utcDay() ? Number(current.used || 0) : 0;
+  return { day: utcDay(), used, limit, remaining: Math.max(0, limit - used) };
 }

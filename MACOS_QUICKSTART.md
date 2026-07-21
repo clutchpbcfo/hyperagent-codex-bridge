@@ -69,6 +69,7 @@ source ~/.zshrc
 hacb doctor
 hacb status
 hacb models
+hacb budget
 ```
 
 Expected:
@@ -143,6 +144,8 @@ Before the smoke test, note the credit/usage figure in Hyperagent's User menu un
 The bridge response also carries a Hyperagent thread ID. You can find the corresponding run in Hyperagent Threads for an audit trail.
 
 ## 8. Use it in the Codex Mac app
+
+Do not enable App Mode on v0.4.0. Require v0.4.1+, `hacb budget` with remaining capacity, and a relay agent configured for low effort with a hard per-run USD cap.
 
 The app does not currently expose CLI profiles in its normal provider picker. Enable the bridge as the main-config default for new app chats:
 

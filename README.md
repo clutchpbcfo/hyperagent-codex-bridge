@@ -10,6 +10,9 @@ A local OAuth bridge that exposes your named Hyperagent agents as a Codex custom
 
 No private browser tokens or undocumented Hyperagent endpoints are used.
 
+> [!IMPORTANT]
+> Upgrade from v0.4.0 immediately. That release forwarded too much Codex App context and had no local request ceiling, which could consume credits quickly. v0.4.1 strips injected context, defaults to low effort, blocks recursive multi-agent tools, and enforces a persistent daily request cap.
+
 ## Architecture
 
 ```text
@@ -108,7 +111,7 @@ In Codex, send a small test such as: `Reply with exactly: hyperagent route works
 
 ## Codex App Mode
 
-The Codex desktop app does not currently expose CLI profiles as first-class provider choices. v0.4.0 includes a reversible App Mode that makes the Hyperagent bridge the default in the main Codex config so **new app chats** use Hyperagent credits:
+The Codex desktop app does not currently expose CLI profiles as first-class provider choices. v0.4.1 includes a reversible App Mode that makes the Hyperagent bridge the default in the main Codex config so **new app chats** use Hyperagent credits:
 
 ```bash
 hacb app-on hyperagent/codex-relay-sol
@@ -177,6 +180,31 @@ Then revoke the OAuth connection at:
 <https://hyperagent.com/settings/mcp-access>
 
 CLI mode leaves `~/.codex/config.toml` defaults untouched and uses `~/.codex/hyperagent.config.toml`. App Mode intentionally updates the main config after creating `config.toml.hacb-app-backup`; `hacb app-off` restores the original defaults while retaining the bridge provider for chat resume.
+
+## Cost controls
+
+v0.4.1 fails closed by default:
+
+- low reasoning effort;
+- 20 Hyperagent sampling requests per UTC day;
+- 24,000 retained conversation characters;
+- 6,000 characters per retained turn;
+- eight retained turns;
+- 32 forwarded client tools;
+- 70,000-character final prompt ceiling;
+- multi-agent delegation tools blocked;
+- client-requested effort escalation ignored unless explicitly enabled.
+
+Check the local ceiling before work:
+
+```bash
+hacb budget
+hacb audit 12
+```
+
+A Codex tool loop consumes at least two Hyperagent requests. Raising `maxRequestsPerDay`, input limits, or reasoning effort is an explicit operator decision, not an automatic behavior.
+
+These controls do not replace the Hyperagent agent-level budget. Configure each relay agent with low effort and a hard per-run USD cap before production use.
 
 ## Security
 

@@ -133,7 +133,7 @@ export async function installCodexProfile(config, { defaultModel, agents = null 
     `model = ${tomlString(selected)}`,
     `model_provider = ${tomlString(config.codexProviderId)}`,
     `model_catalog_json = ${tomlString(modelCatalogPath())}`,
-    'model_reasoning_effort = "medium"',
+    'model_reasoning_effort = "low"',
     '',
     `[model_providers.${config.codexProviderId}]`,
     'name = "Hyperagent Credits"',

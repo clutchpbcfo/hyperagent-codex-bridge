@@ -7,6 +7,7 @@ import { BridgeServer } from './bridge.mjs';
 import {
   atomicWriteText,
   auditPath,
+  getDailyBudgetStatus,
   loadConfig,
   logPath,
   pidPath,
@@ -45,6 +46,7 @@ Usage:
   hacb app-off               Restore normal App defaults; keep old bridge chats resumable
   hacb app-status            Show whether Codex App mode is active
   hacb audit [count]         Show recent sanitized bridge routing receipts
+  hacb budget                Show the local daily Hyperagent request cap
   hacb serve                 Run the local bridge in the foreground
   hacb start                 Run the local bridge in the background
   hacb stop                  Stop the background bridge
@@ -146,6 +148,8 @@ async function runDoctor(config) {
   };
   report(Number(process.versions.node.split('.')[0]) >= 20, 'Node.js 20+', process.version);
   report(typeof config.localApiToken === 'string' && config.localApiToken.length >= 32, 'Local bridge bearer token', 'stored in protected config');
+  const budget = await getDailyBudgetStatus(config);
+  report(budget.remaining > 0, 'Daily request budget', `${budget.used}/${budget.limit} used, ${budget.remaining} remaining`);
   try {
     const token = await getAccessToken(config, { require: false });
     report(Boolean(token), 'Hyperagent OAuth', token ? 'connected' : 'run hacb login');
@@ -273,9 +277,17 @@ async function main() {
           item.model || '',
           item.threadId || '',
           item.outputType || '',
+          item.promptChars ? `promptChars=${item.promptChars}` : '',
+          item.dailyUsed ? `daily=${item.dailyUsed}/${item.dailyLimit}` : '',
           item.error || ''
         ].filter(Boolean).join('  '));
       }
+      break;
+    }
+    case 'budget': {
+      const budget = await getDailyBudgetStatus(config);
+      console.log(`${budget.day}  ${budget.used}/${budget.limit} requests used  ${budget.remaining} remaining`);
+      console.log('Each Codex tool loop can consume multiple Hyperagent requests. Change maxRequestsPerDay only after reviewing credits.');
       break;
     }
     case 'setup': {

@@ -29,7 +29,7 @@ function createHarness(reply) {
     pollIntervalMs: 5,
     localApiToken: 'test-local-token-12345678901234567890'
   };
-  return { bridge: new BridgeServer(config, { clientFactory: factory, auditWriter: async event => audits.push(event) }), calls, audits };
+  return { bridge: new BridgeServer(config, { clientFactory: factory, auditWriter: async event => audits.push(event), budgetGuard: async () => ({ used: 1, limit: 20, remaining: 19 }) }), calls, audits };
 }
 
 async function withBridge(reply, fn) {
@@ -115,6 +115,28 @@ test('Responses endpoint maps Hyperagent JSON to a Codex function call', async (
     assert.match(text, /"type":"function_call"/);
     assert.match(text, /"name":"shell"/);
     assert.match(text, /\\"command\\":\\"pwd\\"/);
+  });
+});
+
+test('Responses endpoint accepts namespaced tools supplied through additional_tools', async () => {
+  await withBridge('{"type":"function_call","name":"mcp__node_repl__js","arguments":{"code":"1+1"}}', async base => {
+    const response = await fetch(`${base}/v1/responses`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'hyperagent/sol-coder',
+        input: [{
+          type: 'additional_tools',
+          role: 'developer',
+          tools: [{ type: 'namespace', name: 'mcp__node_repl__', tools: [{ type: 'function', name: 'js', parameters: { type: 'object' } }] }]
+        }, { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Use Chrome.' }] }],
+        stream: true
+      })
+    });
+    const text = await response.text();
+    assert.match(text, /"type":"function_call"/);
+    assert.match(text, /"name":"mcp__node_repl__js"/);
+    assert.doesNotMatch(text, /unavailable function tool/);
   });
 });
 

@@ -115,6 +115,17 @@ hacb profile hyperagent/fable
 
 Never infer an agent ID. Read it from `hacb models`.
 
+## Cost gate
+
+Before any live work:
+
+```bash
+hacb budget
+hacb app-status
+```
+
+Require v0.4.1+, low relay effort, a hard Hyperagent per-run USD cap, and remaining local daily budget. Never raise `maxRequestsPerDay`, context limits, forwarded-tool limits, or reasoning effort without the user's explicit approval after reviewing actual credit usage. Keep multi-agent tools blocked for relay sessions.
+
 ## Prove routing and billing
 
 Run a controlled prompt, then inspect sanitized receipts:
@@ -154,7 +165,7 @@ App is still showing a normal OpenAI model:
 
 1. Do not send a prompt.
 2. Run `hacb app-status`.
-3. Confirm `hacb` is version 0.4.0 or newer.
+3. Confirm `hacb` is version 0.4.1 or newer. v0.4.0 must not be used because it lacks cost caps and context stripping.
 4. Fully quit the app with `Cmd+Q` on macOS or Exit on Windows.
 5. Reopen and create a new chat.
 

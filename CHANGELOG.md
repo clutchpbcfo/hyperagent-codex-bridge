@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.1 — 2026-07-20
+
+Emergency cost-control and Codex App tool-compatibility patch.
+
+- Strip injected developer, app, skills, environment, and AGENTS context before paid relay calls.
+- Bound retained history to eight turns and 24,000 characters total by default.
+- Cap individual retained turns at 6,000 characters and forwarded tools at 32.
+- Default reasoning effort to low and ignore client effort escalation unless explicitly enabled.
+- Add a persistent 20-request daily ceiling and `hacb budget` visibility.
+- Block multi-agent delegation tools by default to prevent recursive paid runs.
+- Read Codex `additional_tools` and `tool_search_output` declarations.
+- Flatten MCP namespace tools such as `mcp__node_repl__js` into callable functions.
+- Add client-executed `tool_search_call` support for deferred tools.
+- Expand the suite to 22 passing tests, including the exact unavailable-MCP-tool regression.
+
 ## 0.4.0 — 2026-07-20
 
 - Added a global Codex skill and installable Codex plugin manifest.
