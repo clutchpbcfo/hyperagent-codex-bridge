@@ -1,5 +1,8 @@
 # Hyperagent Codex Bridge v0.4.0
 
+> [!WARNING]
+> Do not use v0.4.0. It lacks cost controls and can consume Hyperagent credits rapidly. Upgrade to v0.4.1 or newer immediately. v0.4.0 is retained only for audit and reproducibility.
+
 The first public proof-of-work release.
 
 ## Highlights

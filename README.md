@@ -56,7 +56,7 @@ For reliable Codex tool use, make each model-specific agent a dedicated relay ag
 
 ## Install and connect
 
-Platform guides: `MACOS_QUICKSTART.md` and `WINDOWS_QUICKSTART.md`. Public validation details live in `docs/PROOF_OF_WORK.md`; an article-ready narrative is in `docs/HYPERAGENT_ARTICLE_SECTION.md`.
+Platform guides: `MACOS_QUICKSTART.md` and `WINDOWS_QUICKSTART.md`. New users should start with `docs/NEW_USER_ONBOARDING.md`. Public validation details live in `docs/PROOF_OF_WORK.md`; an article-ready narrative is in `docs/HYPERAGENT_ARTICLE_SECTION.md`.
 
 From a clone or extracted release:
 
