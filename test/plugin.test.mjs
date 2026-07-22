@@ -15,5 +15,5 @@ test('Codex plugin manifest points to the bundled skill and matches package vers
   assert.equal(plugin.license, 'MIT');
   assert.match(plugin.repository, /clutchpbcfo\/hyperagent-codex-bridge/);
   const skill = await readFile(join(root, 'skills', 'hyperagent-codex-bridge', 'SKILL.md'), 'utf8');
-  assert.match(skill, /^---\nname: hyperagent-codex-bridge\n/m);
+  assert.match(skill, /^---\r?\nname: hyperagent-codex-bridge\r?\n/m);
 });
