@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 — 2026-07-22
+
+Release-hardening update focused on enforcing the cost controls claimed by v0.4.1.
+
+- Migrate unversioned legacy configurations to the six-request safe ceiling without rotating OAuth or local bearer secrets.
+- Preserve explicitly versioned operator overrides while making above-default caps visible in `hacb doctor`.
+- Add `hacb budget --safe` and explicit `hacb budget --set <count>` controls.
+- Enforce the daily request ceiling across multiple bridge processes with a fail-closed filesystem lock.
+- Add multi-process budget, migration, and explicit-override regression coverage.
+- Add a committed lockfile and cross-platform GitHub Actions validation.
+
 ## 0.4.1 — 2026-07-20
 
 Emergency cost-control and Codex App tool-compatibility patch.

@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { appendFile, chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 export const APP_NAME = 'hyperagent-codex-bridge';
-export const VERSION = '0.4.1';
+export const VERSION = '0.4.2';
+export const CONFIG_SCHEMA_VERSION = 2;
+export const SAFE_MAX_REQUESTS_PER_DAY = 6;
 export const DEFAULT_MCP_URL = 'https://hyperagent.com/api/mcp';
 export const DEFAULT_ISSUER = 'https://hyperagent.com';
 export const DEFAULT_BRIDGE_PORT = 47831;
@@ -42,7 +44,12 @@ export function usagePath() {
   return join(stateDir(), 'usage.json');
 }
 
+function usageLockPath() {
+  return join(stateDir(), 'usage.lock');
+}
+
 export const DEFAULT_CONFIG = Object.freeze({
+  configVersion: CONFIG_SCHEMA_VERSION,
   mcpUrl: DEFAULT_MCP_URL,
   issuer: DEFAULT_ISSUER,
   bridgeHost: '127.0.0.1',
@@ -63,7 +70,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   localApiToken: null,
   defaultReasoningEffort: 'low',
   allowClientReasoningEffort: false,
-  maxRequestsPerDay: 6,
+  maxRequestsPerDay: SAFE_MAX_REQUESTS_PER_DAY,
   maxInputChars: 24000,
   maxTurnChars: 6000,
   maxConversationTurns: 8,
@@ -93,11 +100,23 @@ export async function loadState() {
 
 export async function loadConfig() {
   await ensureStateDir();
-  const user = await readJson(configPath(), {});
+  const source = await readJson(configPath(), {});
+  const user = source && typeof source === 'object' && !Array.isArray(source) ? { ...source } : {};
+  let changed = false;
+  const version = Number.isSafeInteger(user.configVersion) ? user.configVersion : 0;
+  if (version < CONFIG_SCHEMA_VERSION) {
+    const legacyLimit = user.maxRequestsPerDay;
+    if (!Number.isSafeInteger(legacyLimit) || legacyLimit < 1 || legacyLimit > SAFE_MAX_REQUESTS_PER_DAY) {
+      user.maxRequestsPerDay = SAFE_MAX_REQUESTS_PER_DAY;
+    }
+    user.configVersion = CONFIG_SCHEMA_VERSION;
+    changed = true;
+  }
   if (typeof user.localApiToken !== 'string' || user.localApiToken.length < 32) {
     user.localApiToken = randomBytes(32).toString('base64url');
-    await atomicWriteJson(configPath(), user, 0o600);
+    changed = true;
   }
+  if (changed) await atomicWriteJson(configPath(), user, 0o600);
   return {
     ...structuredClone(DEFAULT_CONFIG),
     ...user,
@@ -148,9 +167,45 @@ function utcDay() {
 
 let budgetQueue = Promise.resolve();
 
+function dailyLimit(config) {
+  const value = config?.maxRequestsPerDay;
+  if (!Number.isSafeInteger(value) || value < 1) return SAFE_MAX_REQUESTS_PER_DAY;
+  return Math.min(value, 100);
+}
+
+async function withUsageLock(callback) {
+  await ensureStateDir();
+  const path = usageLockPath();
+  const deadline = Date.now() + 5000;
+  let handle;
+  while (!handle) {
+    try {
+      handle = await open(path, 'wx', 0o600);
+      await handle.writeFile(`${process.pid} ${Date.now()}\n`);
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      const age = await stat(path).then(info => Date.now() - info.mtimeMs).catch(() => 0);
+      if (age > 30_000) {
+        await unlink(path).catch(() => {});
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw Object.assign(new Error('Could not acquire the daily budget lock; denying the Hyperagent request.'), { status: 503 });
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }
+  try {
+    return await callback();
+  } finally {
+    await handle.close().catch(() => {});
+    await unlink(path).catch(() => {});
+  }
+}
+
 export function consumeDailyRequestBudget(config) {
-  const run = budgetQueue.then(async () => {
-    const limit = Math.max(1, Number(config.maxRequestsPerDay || 6));
+  const run = budgetQueue.then(() => withUsageLock(async () => {
+    const limit = dailyLimit(config);
     const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
     if (current.day !== utcDay()) {
       current.day = utcDay();
@@ -162,13 +217,13 @@ export function consumeDailyRequestBudget(config) {
     current.used += 1;
     await atomicWriteJson(usagePath(), current, 0o600);
     return { day: current.day, used: current.used, limit, remaining: limit - current.used };
-  });
+  }));
   budgetQueue = run.catch(() => {});
   return run;
 }
 
 export async function getDailyBudgetStatus(config) {
-  const limit = Math.max(1, Number(config.maxRequestsPerDay || 6));
+  const limit = dailyLimit(config);
   const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
   const used = current.day === utcDay() ? Number(current.used || 0) : 0;
   return { day: utcDay(), used, limit, remaining: Math.max(0, limit - used) };

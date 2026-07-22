@@ -12,6 +12,7 @@ import {
   logPath,
   pidPath,
   saveConfig,
+  SAFE_MAX_REQUESTS_PER_DAY,
   stateDir,
   VERSION
 } from './config.mjs';
@@ -47,6 +48,8 @@ Usage:
   hacb app-status            Show whether Codex App mode is active
   hacb audit [count]         Show recent sanitized bridge routing receipts
   hacb budget                Show the local daily Hyperagent request cap
+  hacb budget --safe         Restore the six-request safe default
+  hacb budget --set <count>  Explicitly set a custom daily request cap (1-100)
   hacb serve                 Run the local bridge in the foreground
   hacb start                 Run the local bridge in the background
   hacb stop                  Stop the background bridge
@@ -150,6 +153,7 @@ async function runDoctor(config) {
   report(typeof config.localApiToken === 'string' && config.localApiToken.length >= 32, 'Local bridge bearer token', 'stored in protected config');
   const budget = await getDailyBudgetStatus(config);
   report(budget.remaining > 0, 'Daily request budget', `${budget.used}/${budget.limit} used, ${budget.remaining} remaining`);
+  report(budget.limit <= SAFE_MAX_REQUESTS_PER_DAY, 'Safe request ceiling', budget.limit <= SAFE_MAX_REQUESTS_PER_DAY ? `${budget.limit} per UTC day` : `custom cap ${budget.limit} exceeds safe default ${SAFE_MAX_REQUESTS_PER_DAY}`);
   try {
     const token = await getAccessToken(config, { require: false });
     report(Boolean(token), 'Hyperagent OAuth', token ? 'connected' : 'run hacb login');
@@ -285,9 +289,24 @@ async function main() {
       break;
     }
     case 'budget': {
+      if (args[0] === '--safe') {
+        config.maxRequestsPerDay = SAFE_MAX_REQUESTS_PER_DAY;
+        await saveConfig(config);
+        console.log(`Restored safe daily request cap: ${SAFE_MAX_REQUESTS_PER_DAY}.`);
+      } else if (args[0] === '--set') {
+        const requested = Number(args[1]);
+        if (!Number.isSafeInteger(requested) || requested < 1 || requested > 100) {
+          throw new Error('Usage: hacb budget --set <integer from 1 to 100>');
+        }
+        config.maxRequestsPerDay = requested;
+        await saveConfig(config);
+        console.log(`Set custom daily request cap: ${requested}. The safe default is ${SAFE_MAX_REQUESTS_PER_DAY}.`);
+      } else if (args.length) {
+        throw new Error('Usage: hacb budget [--safe | --set <count>]');
+      }
       const budget = await getDailyBudgetStatus(config);
       console.log(`${budget.day}  ${budget.used}/${budget.limit} requests used  ${budget.remaining} remaining`);
-      console.log('Each Codex tool loop can consume multiple Hyperagent requests. Change maxRequestsPerDay only after reviewing credits.');
+      console.log('Each Codex tool loop can consume multiple Hyperagent requests. Raise the cap only after reviewing credits.');
       break;
     }
     case 'setup': {
