@@ -104,6 +104,7 @@ You can also pass an exact agent name instead of its ID if the name is unique.
 hacb doctor
 hacb status
 curl http://127.0.0.1:47831/health
+curl http://127.0.0.1:47831/ready
 codex --profile hyperagent
 ```
 
@@ -133,6 +134,10 @@ hacb audit 12
 ```
 
 The audit log records timestamps, model IDs, Hyperagent thread IDs, and completion type, but never prompts, outputs, or tokens. It is the proof that a Codex App turn traversed the bridge.
+
+Every HTTP response includes a server-generated `X-Request-Id`. Responses requests also include `X-Usage-Source: unavailable`: Hyperagent's documented MCP thread tools do not currently return authoritative token counts, so the bridge omits the Responses `usage` object instead of fabricating zeros.
+
+Callers may send an `Idempotency-Key` header. Identical completed requests replay without another Hyperagent thread while the bridge process remains running; changed request bodies conflict, and in-progress or indeterminate outcomes fail closed. Idempotency response data is intentionally memory-only and expires after 24 hours, so a restart does not claim it can replay an answer it no longer has.
 
 Do not remove the `hyperagent_credits` provider block while desktop chats created under it still exist; Codex persists the provider id with each chat.
 
@@ -166,6 +171,10 @@ hacb logout
 ```
 
 `hacb serve` runs in the foreground and is best for debugging. Background startup errors are written to `~/.hyperagent-codex-bridge/bridge.log`.
+
+Structured request logs are written to `~/.hyperagent-codex-bridge/gateway.jsonl`. They contain request IDs, route/status/timing fields, and sanitized error codes—never authorization headers, prompts, model output, OAuth tokens, or local bearer tokens. `/health` is a process-liveness probe. `/ready` additionally requires a reachable cached/recent agent listing and remaining local request budget.
+
+For Linux service and loopback-only container operation, see `docs/SELF_HOSTING.md`. The gateway refuses non-loopback binds; do not expose it through a public listener or reverse proxy.
 
 ## Rollback
 
@@ -204,6 +213,8 @@ hacb audit 12
 
 A Codex tool loop consumes at least two Hyperagent requests. Raising `maxRequestsPerDay`, input limits, or reasoning effort is an explicit operator decision, not an automatic behavior.
 
+Budget state is reserved durably before provider dispatch, committed immediately before a `create_thread` attempt, and released only when the request is known not to have been dispatched. A disconnect after dispatch remains committed because the documented Hyperagent MCP surface cannot prove that the remote attempt stopped.
+
 These controls do not replace the Hyperagent agent-level budget. Configure each relay agent with low effort and a hard per-run USD cap before production use.
 
 ## Security
@@ -224,6 +235,7 @@ These controls do not replace the Hyperagent agent-level budget. Configure each 
 5. **Codex Desktop model picker bug.** Current Codex Desktop builds may label custom provider models as `Custom` or hide them. The CLI/profile still sends the configured model ID correctly. Use `hacb profile <model-id>` or `codex --profile hyperagent -m <model-id>` when the picker is unreliable.
 6. **Tool-call quality depends on the selected agent.** Its prompt should emphasize exact JSON tool selection and local Codex tool use. The bridge falls back to plain final text if the agent does not follow the relay schema.
 7. **This is an adapter, not a Hyperagent product feature.** A future official Hyperagent Responses gateway would be faster and should replace this bridge.
+8. **No provider-reported usage or remote cancellation.** Token usage is omitted, and disconnect cancellation stops only local polling after dispatch. Hyperagent platform support is required for authoritative usage/cost data, remote thread cancellation, and reconciliation of ambiguous `create_thread` outcomes.
 
 ## Sources
 

@@ -278,12 +278,13 @@ async function main() {
         console.log([
           item.at,
           item.event,
+          item.requestId || '',
           item.model || '',
           item.threadId || '',
           item.outputType || '',
           item.promptChars ? `promptChars=${item.promptChars}` : '',
           item.dailyUsed ? `daily=${item.dailyUsed}/${item.dailyLimit}` : '',
-          item.error || ''
+          item.errorCode || ''
         ].filter(Boolean).join('  '));
       }
       break;
@@ -305,7 +306,7 @@ async function main() {
         throw new Error('Usage: hacb budget [--safe | --set <count>]');
       }
       const budget = await getDailyBudgetStatus(config);
-      console.log(`${budget.day}  ${budget.used}/${budget.limit} requests used  ${budget.remaining} remaining`);
+      console.log(`${budget.day}  ${budget.used}/${budget.limit} slots used  ${budget.remaining} remaining (${budget.committed} committed, ${budget.reserved} reserved)`);
       console.log('Each Codex tool loop can consume multiple Hyperagent requests. Raise the cap only after reviewing credits.');
       break;
     }

@@ -29,6 +29,8 @@ Never commit or share:
 
 - `~/.hyperagent-codex-bridge/state.json`;
 - `~/.hyperagent-codex-bridge/config.json`;
+- `~/.hyperagent-codex-bridge/usage.json`;
+- `~/.hyperagent-codex-bridge/audit.jsonl` and `gateway.jsonl`;
 - `~/.codex/auth.json`;
 - generated `hyperagent.config.toml` or App Mode backups.
 

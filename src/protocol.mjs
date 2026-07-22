@@ -358,8 +358,17 @@ export function responseIds() {
   return { responseId: `resp_${id}`, itemId: `msg_${id}`, callId: `call_${id}` };
 }
 
-export function sseEvents(output, ids, { model, threadId } = {}) {
-  const response = { id: ids.responseId, status: 'in_progress', model, output: [], metadata: { hyperagent_thread_id: threadId } };
+function responseMetadata(threadId, requestId) {
+  return {
+    hyperagent_thread_id: threadId,
+    ...(requestId ? { request_id: requestId } : {}),
+    usage_source: 'unavailable'
+  };
+}
+
+export function sseEvents(output, ids, { model, threadId, requestId } = {}) {
+  const metadata = responseMetadata(threadId, requestId);
+  const response = { id: ids.responseId, status: 'in_progress', model, output: [], metadata };
   const events = [{ type: 'response.created', response }];
   if (output.type === 'function_call') {
     events.push({
@@ -393,14 +402,13 @@ export function sseEvents(output, ids, { model, threadId } = {}) {
       id: ids.responseId,
       status: 'completed',
       model,
-      metadata: { hyperagent_thread_id: threadId },
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+      metadata
     }
   });
   return events;
 }
 
-export function nonStreamingResponse(output, ids, { model, threadId } = {}) {
+export function nonStreamingResponse(output, ids, { model, threadId, requestId } = {}) {
   const item = output.type === 'function_call'
     ? { type: 'function_call', call_id: ids.callId, name: output.name, arguments: output.arguments }
     : output.type === 'custom_tool_call'
@@ -414,7 +422,6 @@ export function nonStreamingResponse(output, ids, { model, threadId } = {}) {
     status: 'completed',
     model,
     output: [item],
-    metadata: { hyperagent_thread_id: threadId },
-    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+    metadata: responseMetadata(threadId, requestId)
   };
 }

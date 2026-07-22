@@ -5,7 +5,15 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { configPath, consumeDailyRequestBudget, getDailyBudgetStatus, loadConfig } from '../src/config.mjs';
+import {
+  commitDailyRequestBudget,
+  configPath,
+  consumeDailyRequestBudget,
+  getDailyBudgetStatus,
+  loadConfig,
+  releaseDailyRequestBudget,
+  reserveDailyRequestBudget
+} from '../src/config.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,6 +49,31 @@ test('daily request budget persists and fails closed at the cap', async () => {
     const status = await getDailyBudgetStatus(config);
     assert.equal(status.used, 2);
     assert.equal(status.remaining, 0);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.HACB_HOME;
+    else process.env.HACB_HOME = previous;
+  }
+});
+
+test('budget reservations reconcile before dispatch and remain durable while pending', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hacb-reservation-'));
+  const previous = process.env.HACB_HOME;
+  process.env.HACB_HOME = home;
+  try {
+    const config = { maxRequestsPerDay: 2 };
+    const first = await reserveDailyRequestBudget(config, { requestId: 'req_test_1' });
+    assert.equal((await getDailyBudgetStatus(config)).reserved, 1);
+    await releaseDailyRequestBudget(first.id, config, { reason: 'client_disconnected' });
+    assert.deepEqual(await getDailyBudgetStatus(config), {
+      day: new Date().toISOString().slice(0, 10), used: 0, committed: 0, reserved: 0, limit: 2, remaining: 2
+    });
+
+    const second = await reserveDailyRequestBudget(config, { requestId: 'req_test_2' });
+    const committed = await commitDailyRequestBudget(second.id, config);
+    assert.equal(committed.committed, 1);
+    assert.equal(committed.remaining, 1);
+    await assert.rejects(() => commitDailyRequestBudget(second.id, config), /already reconciled/);
   } finally {
     await rm(home, { recursive: true, force: true });
     if (previous === undefined) delete process.env.HACB_HOME;

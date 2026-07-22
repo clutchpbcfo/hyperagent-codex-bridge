@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFile, chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -42,6 +42,10 @@ export function auditPath() {
 
 export function usagePath() {
   return join(stateDir(), 'usage.json');
+}
+
+export function gatewayLogPath() {
+  return join(stateDir(), 'gateway.jsonl');
 }
 
 function usageLockPath() {
@@ -161,6 +165,14 @@ export async function appendAudit(event) {
   await chmod(path, 0o600).catch(() => {});
 }
 
+export async function appendGatewayLog(event) {
+  await ensureStateDir();
+  const path = gatewayLogPath();
+  const entry = { at: new Date().toISOString(), ...event };
+  await appendFile(path, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+  await chmod(path, 0o600).catch(() => {});
+}
+
 function utcDay() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -203,20 +215,91 @@ async function withUsageLock(callback) {
   }
 }
 
-export function consumeDailyRequestBudget(config) {
+export async function consumeDailyRequestBudget(config) {
+  const reservation = await reserveDailyRequestBudget(config);
+  return commitDailyRequestBudget(reservation.id, config);
+}
+
+function normalizeUsage(current) {
+  const day = utcDay();
+  if (!current || current.day !== day) {
+    return { version: 2, day, committed: 0, reservations: {} };
+  }
+  const reservations = current.reservations && typeof current.reservations === 'object'
+    ? current.reservations
+    : {};
+  return {
+    version: 2,
+    day,
+    committed: Math.max(0, Number(current.committed ?? current.used ?? 0) || 0),
+    reservations
+  };
+}
+
+function usageSummary(current, limit) {
+  const reserved = Object.values(current.reservations).filter(item => item?.state === 'reserved').length;
+  const used = current.committed + reserved;
+  return {
+    day: current.day,
+    used,
+    committed: current.committed,
+    reserved,
+    limit,
+    remaining: Math.max(0, limit - used)
+  };
+}
+
+export function reserveDailyRequestBudget(config, { requestId = null } = {}) {
   const run = budgetQueue.then(() => withUsageLock(async () => {
     const limit = dailyLimit(config);
-    const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
-    if (current.day !== utcDay()) {
-      current.day = utcDay();
-      current.used = 0;
+    const current = normalizeUsage(await readJson(usagePath(), { version: 2, day: utcDay(), committed: 0, reservations: {} }));
+    const summary = usageSummary(current, limit);
+    if (summary.used >= limit) {
+      throw Object.assign(new Error(`Daily Hyperagent request cap reached (${summary.used}/${limit}). Raise maxRequestsPerDay explicitly only after reviewing credit usage.`), { status: 429, code: 'budget_exhausted' });
     }
-    if (current.used >= limit) {
-      throw Object.assign(new Error(`Daily Hyperagent request cap reached (${current.used}/${limit}). Raise maxRequestsPerDay explicitly only after reviewing credit usage.`), { status: 429 });
-    }
-    current.used += 1;
+    const id = `budget_${randomUUID().replaceAll('-', '')}`;
+    current.reservations[id] = {
+      state: 'reserved',
+      createdAt: new Date().toISOString(),
+      ...(requestId ? { requestId } : {})
+    };
     await atomicWriteJson(usagePath(), current, 0o600);
-    return { day: current.day, used: current.used, limit, remaining: limit - current.used };
+    return { id, ...usageSummary(current, limit) };
+  }));
+  budgetQueue = run.catch(() => {});
+  return run;
+}
+
+export function commitDailyRequestBudget(reservationId, config) {
+  const run = budgetQueue.then(() => withUsageLock(async () => {
+    const limit = dailyLimit(config);
+    const current = normalizeUsage(await readJson(usagePath(), { version: 2, day: utcDay(), committed: 0, reservations: {} }));
+    const reservation = current.reservations[reservationId];
+    if (!reservation || reservation.state !== 'reserved') {
+      throw Object.assign(new Error('Budget reservation is missing or already reconciled; denying the Hyperagent request.'), { status: 503, code: 'budget_reservation_invalid' });
+    }
+    reservation.state = 'committed';
+    reservation.committedAt = new Date().toISOString();
+    current.committed += 1;
+    await atomicWriteJson(usagePath(), current, 0o600);
+    return { id: reservationId, ...usageSummary(current, limit) };
+  }));
+  budgetQueue = run.catch(() => {});
+  return run;
+}
+
+export function releaseDailyRequestBudget(reservationId, config, { reason = 'not_dispatched' } = {}) {
+  const run = budgetQueue.then(() => withUsageLock(async () => {
+    const limit = dailyLimit(config);
+    const current = normalizeUsage(await readJson(usagePath(), { version: 2, day: utcDay(), committed: 0, reservations: {} }));
+    const reservation = current.reservations[reservationId];
+    if (reservation?.state === 'reserved') {
+      reservation.state = 'released';
+      reservation.releasedAt = new Date().toISOString();
+      reservation.reason = String(reason).slice(0, 80);
+      await atomicWriteJson(usagePath(), current, 0o600);
+    }
+    return { id: reservationId, ...usageSummary(current, limit) };
   }));
   budgetQueue = run.catch(() => {});
   return run;
@@ -224,7 +307,6 @@ export function consumeDailyRequestBudget(config) {
 
 export async function getDailyBudgetStatus(config) {
   const limit = dailyLimit(config);
-  const current = await readJson(usagePath(), { day: utcDay(), used: 0 });
-  const used = current.day === utcDay() ? Number(current.used || 0) : 0;
-  return { day: utcDay(), used, limit, remaining: Math.max(0, limit - used) };
+  const current = normalizeUsage(await readJson(usagePath(), { version: 2, day: utcDay(), committed: 0, reservations: {} }));
+  return usageSummary(current, limit);
 }

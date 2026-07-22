@@ -60,7 +60,7 @@ export class McpClient {
     this.initialized = false;
   }
 
-  async request(method, params, { notification = false } = {}) {
+  async request(method, params, { notification = false, signal } = {}) {
     const id = notification ? undefined : this.nextId++;
     const payload = {
       jsonrpc: '2.0',
@@ -81,7 +81,8 @@ export class McpClient {
     const response = await fetch(this.config.mcpUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal
     });
     const newSessionId = response.headers.get('mcp-session-id');
     if (newSessionId) this.sessionId = newSessionId;
@@ -106,15 +107,15 @@ export class McpClient {
     return envelope.result;
   }
 
-  async connect() {
+  async connect({ signal } = {}) {
     if (this.initialized) return this;
     const result = await this.request('initialize', {
       protocolVersion: this.protocolVersion,
       capabilities: {},
       clientInfo: { name: 'hyperagent-codex-bridge', version: VERSION }
-    });
+    }, { signal });
     if (result?.protocolVersion) this.protocolVersion = result.protocolVersion;
-    await this.request('notifications/initialized', undefined, { notification: true });
+    await this.request('notifications/initialized', undefined, { notification: true, signal });
     this.initialized = true;
     return this;
   }
@@ -124,9 +125,9 @@ export class McpClient {
     return this.request('tools/list', {});
   }
 
-  async callTool(name, args = {}) {
-    await this.connect();
-    const result = await this.request('tools/call', { name, arguments: args });
+  async callTool(name, args = {}, { signal } = {}) {
+    await this.connect({ signal });
+    const result = await this.request('tools/call', { name, arguments: args }, { signal });
     if (result?.isError) {
       throw new Error(`Hyperagent tool ${name} failed: ${contentText(result) || 'unknown error'}`);
     }

@@ -15,5 +15,8 @@
     "node": ">=20"
   },
   "license": "MIT",
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "openai": "^6.48.0"
+  }
 }

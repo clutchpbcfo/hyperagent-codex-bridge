@@ -106,6 +106,7 @@ test('Codex model metadata and SSE fixtures include required fields', () => {
   assert.deepEqual(events.map(event => event.type), ['response.created', 'response.output_item.done', 'response.completed']);
   assert.equal(events[1].item.type, 'function_call');
   assert.equal(events[1].item.call_id, 'call_1');
+  assert.equal('usage' in events.at(-1).response, false);
 
   const searchEvents = sseEvents(
     { type: 'tool_search_call', arguments: { query: 'Chrome' } },

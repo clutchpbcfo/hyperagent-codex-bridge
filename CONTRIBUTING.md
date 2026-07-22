@@ -14,6 +14,16 @@ Run the real Codex integration tests when Codex is installed:
 CODEX_BIN="$(command -v codex)" npm test
 ```
 
+The official OpenAI JavaScript client fixture runs in the default suite against a fully mocked bridge. To include the Python client fixture without making Python a Node package prerequisite:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r fixtures/requirements.txt
+OPENAI_PYTHON_BIN="$PWD/.venv/bin/python" npm test
+```
+
+Both fixtures use local mock Hyperagent clients. They require no OAuth credentials, real provider calls, or credits.
+
 ## Pull request requirements
 
 - Keep Node.js support at version 20 or newer.

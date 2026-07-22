@@ -128,23 +128,23 @@ export class HyperagentClient {
     return normalizeAgents(await this.mcp.callTool('list_agents', {}));
   }
 
-  async createThread(agentId, message) {
-    const decoded = decodeToolResult(await this.mcp.callTool('create_thread', { agentId, message }));
+  async createThread(agentId, message, { signal } = {}) {
+    const decoded = decodeToolResult(await this.mcp.callTool('create_thread', { agentId, message }, { signal }));
     const threadId = findThreadId(decoded);
     if (!threadId) throw new Error(`Hyperagent create_thread did not return a threadId: ${JSON.stringify(decoded).slice(0, 1000)}`);
     return threadId;
   }
 
-  async getThread(threadId) {
-    return decodeToolResult(await this.mcp.callTool('get_thread', { threadId }));
+  async getThread(threadId, { signal } = {}) {
+    return decodeToolResult(await this.mcp.callTool('get_thread', { threadId }, { signal }));
   }
 
   async waitForThread(threadId, { signal, onProgress } = {}) {
     const started = Date.now();
     let previousStatus = '';
     while (Date.now() - started < this.config.runTimeoutMs) {
-      if (signal?.aborted) throw new Error('Request aborted.');
-      const thread = await this.getThread(threadId);
+      if (signal?.aborted) throw signal.reason || Object.assign(new Error('Request aborted.'), { code: 'client_disconnected' });
+      const thread = await this.getThread(threadId, { signal });
       const status = statusOf(thread) || 'unknown';
       if (status !== previousStatus) onProgress?.(status, thread);
       previousStatus = status;
@@ -158,7 +158,18 @@ export class HyperagentClient {
       }
       const text = finalAssistantText(thread);
       if (status === 'unknown' && text) return { text, thread, status: 'completed' };
-      await new Promise(resolve => setTimeout(resolve, this.config.pollIntervalMs));
+      await new Promise((resolve, reject) => {
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(signal.reason || Object.assign(new Error('Request aborted.'), { code: 'client_disconnected' }));
+        };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, this.config.pollIntervalMs);
+        timer.unref?.();
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
     }
     throw new Error(`Hyperagent thread ${threadId} exceeded the ${Math.round(this.config.runTimeoutMs / 60000)} minute timeout.`);
   }
