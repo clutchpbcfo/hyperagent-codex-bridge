@@ -60,7 +60,7 @@ test('bundled Codex skill installs as a materialized directory', async () => {
   try {
     const result = await installSkill();
     const skill = await readFile(join(result.target, 'SKILL.md'), 'utf8');
-    assert.match(skill, /^---\nname: hyperagent-codex-bridge\n/m);
+  assert.match(skill, /^---\r?\nname: hyperagent-codex-bridge\r?\n/m);
     assert.match(skill, /hacb app-on/);
     const reference = await readFile(join(result.target, 'references', 'COMMANDS.md'), 'utf8');
     assert.match(reference, /Migrate to a second machine/);
