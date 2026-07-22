@@ -38,7 +38,9 @@ Codex request
 
 The Hyperagent credit meter moved. The Codex subscription meter did not.
 
-The first live build also exposed a serious cost flaw: Codex App was forwarding large developer, skills, environment, and AGENTS payloads into every paid relay call, and each local tool loop required multiple Hyperagent sampling requests. That consumed credits far too quickly. v0.4.1 became the real production boundary: injected-context stripping, eight-turn history, a 24K retained-input ceiling, low-effort defaults, a six-request daily cap, multi-agent blocking, and a required per-run agent budget. The correction matters as much as the successful demo. It turned the bridge from a clever route into an operable system.
+The first live build also exposed a serious cost flaw: Codex App was forwarding large developer, skills, environment, and AGENTS payloads into every paid relay call, and each local tool loop required multiple Hyperagent sampling requests. That consumed credits far too quickly. v0.4.1 added injected-context stripping, eight-turn history, a 24K retained-input ceiling, low-effort defaults, a six-request daily cap, multi-agent blocking, and a required per-run agent budget.
+
+The next audit found that the safety claim was still incomplete. A legacy unversioned installation retained its old ten-request ceiling during upgrade, and two bridge processes could race the same file-backed counter. v0.4.2 closes both gaps: unsafe legacy ceilings migrate to six without rotating authentication state, explicit versioned overrides remain operator-controlled, and a cross-process lock makes the daily budget atomic and fail-closed. An eight-process test against a cap of three proves that exactly three requests are admitted.
 
 I then added App Mode for the desktop client. Codex App does not yet expose CLI profiles cleanly in its provider picker, so App Mode makes a reversible, backed-up change to the main Codex config. New chats show the model as `Custom` and the provider label as `Hyperagent Credits`. One command restores normal Codex subscription defaults:
 
@@ -55,7 +57,7 @@ The public release includes:
 - OAuth and local-auth hardening;
 - CLI and App Mode switching;
 - cross-machine migration without copying secrets;
-- automated tests plus real Codex 0.144.6 provider and tool-loop tests;
+- automated tests across macOS, Linux, and Windows on Node 20 and 22, plus real Codex 0.144.6 provider and tool-loop tests;
 - rollback commands and explicit limitations.
 
-This is not an official Hyperagent inference API. It is a bridge built entirely on Hyperagent's supported OAuth MCP surface. If Hyperagent ships a first-party Responses gateway, this adapter should become unnecessary. Until then, it proves a useful product idea: coding clients and model platforms do not need to replace one another. The best architecture lets each own the layer it is already good at.
+This is not an official Hyperagent inference API. It is a bridge built entirely on Hyperagent's supported OAuth MCP surface. The clean product path is a first-party `POST /v1/responses` endpoint with OAuth bearer authentication, SSE streaming, usage metadata, and platform-enforced budgets. If Hyperagent ships that gateway, this adapter should become unnecessary. Until then, it proves a useful product idea: coding clients and model platforms do not need to replace one another. The best architecture lets each own the layer it is already good at.
