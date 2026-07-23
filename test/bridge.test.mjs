@@ -574,3 +574,74 @@ test('disconnect during preflight never reserves budget or creates a Hyperagent 
     await bridge.close();
   }
 });
+
+test('disconnect while awaiting an idempotency claim cannot reserve or dispatch', async () => {
+  let resolveClaim;
+  let claimStarted;
+  const started = new Promise(resolve => { claimStarted = resolve; });
+  const claimReady = new Promise(resolve => { resolveClaim = resolve; });
+  let deleted = 0;
+  let created = 0;
+  let reserved = 0;
+  const bridge = new BridgeServer({
+    bridgeHost: '127.0.0.1', bridgePort: 0, aliases: {}, exposeAllAgents: true,
+    defaultAgentId: null, localApiToken: 'test-local-token-12345678901234567890'
+  }, {
+    clientFactory: () => ({
+      async listAgents() { return [agent]; },
+      async createThread() { created += 1; return 'thread_should_not_exist'; },
+      async close() {}
+    }),
+    auditWriter: async () => {},
+    logWriter: async () => {},
+    idempotencyManager: {
+      async claim() {
+        claimStarted();
+        await claimReady;
+        return { claimed: true };
+      },
+      async delete() { deleted += 1; },
+      async update() {},
+      async reconcile() {}
+    },
+    budgetManager: {
+      async reserve() { reserved += 1; return { id: 'unexpected' }; },
+      async commit(value) { return value; },
+      async release(value) { return value; },
+      async status() { return { remaining: 1 }; }
+    }
+  });
+  await bridge.start();
+  try {
+    const base = `http://127.0.0.1:${bridge.server.address().port}`;
+    const body = JSON.stringify({ model: 'hyperagent/sol-coder', input: 'stop during claim' });
+    let clientRequest;
+    const pending = new Promise(resolve => {
+      clientRequest = httpRequest(`${base}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          ...AUTH,
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+          'idempotency-key': 'disconnect-during-claim'
+        }
+      });
+      clientRequest.on('error', resolve);
+      clientRequest.end(body);
+    });
+    await started;
+    clientRequest.destroy();
+    await pending;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    resolveClaim();
+    for (let attempt = 0; attempt < 40 && deleted === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(deleted, 1);
+    assert.equal(reserved, 0);
+    assert.equal(created, 0);
+  } finally {
+    resolveClaim();
+    await bridge.close();
+  }
+});

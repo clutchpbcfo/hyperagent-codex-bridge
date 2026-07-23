@@ -289,11 +289,24 @@ export class BridgeServer {
     if (!body.model) throw Object.assign(new Error('The model field is required.'), { status: 400, code: 'model_required' });
     const keyHash = idempotencyKey(request);
     const fingerprint = requestFingerprint(body);
+    const abort = new AbortController();
+    const cancel = () => {
+      if (!abort.signal.aborted) abort.abort(abortError());
+    };
+    const onResponseClose = () => {
+      if (!response.writableEnded) cancel();
+    };
+    request.once('aborted', cancel);
+    response.once('close', onResponseClose);
     let idempotencyClaimed = false;
     if (keyHash) {
       const claim = await this.idempotencyManager.claim(keyHash, fingerprint, serverRequestId, this.config);
       const previous = claim.claimed ? null : claim.record;
       idempotencyClaimed = claim.claimed;
+      if (abort.signal.aborted || request.aborted || request.socket?.destroyed || response.destroyed) {
+        if (idempotencyClaimed) await this.idempotencyManager.delete(keyHash, serverRequestId).catch(() => {});
+        throw abort.signal.reason || abortError();
+      }
       if (!previous) {
         // The durable claim belongs to this request.
       } else if (previous.fingerprint !== fingerprint) {
@@ -310,15 +323,6 @@ export class BridgeServer {
         });
       }
     }
-    const abort = new AbortController();
-    const cancel = () => {
-      if (!abort.signal.aborted) abort.abort(abortError());
-    };
-    const onResponseClose = () => {
-      if (!response.writableEnded) cancel();
-    };
-    request.once('aborted', cancel);
-    response.once('close', onResponseClose);
     let agent;
     let reservation;
     let budget;

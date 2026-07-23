@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  atomicWriteJson,
+  atomicWriteText,
   claimIdempotency,
   bridgeUrl,
   commitDailyRequestBudget,
@@ -185,6 +187,52 @@ test('an old lock owned by a dead process is recovered', async () => {
     const status = await consumeDailyRequestBudget({ maxRequestsPerDay: 1 });
     assert.equal(status.used, 1);
     await assert.rejects(() => stat(lock), error => error?.code === 'ENOENT');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.HACB_HOME;
+    else process.env.HACB_HOME = previous;
+  }
+});
+
+test('old crash-created empty and malformed locks recover without manual deletion', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hacb-corrupt-lock-'));
+  const previous = process.env.HACB_HOME;
+  process.env.HACB_HOME = home;
+  try {
+    const old = new Date(Date.now() - 60_000);
+    const usageLock = join(home, 'usage.lock');
+    await writeFile(usageLock, '', { mode: 0o600 });
+    await utimes(usageLock, old, old);
+    assert.equal((await consumeDailyRequestBudget({ maxRequestsPerDay: 2 })).used, 1);
+    await assert.rejects(() => stat(usageLock), error => error?.code === 'ENOENT');
+
+    const idempotencyLock = join(home, 'idempotency.lock');
+    await writeFile(idempotencyLock, 'not-an-owner-record\n', { mode: 0o600 });
+    await utimes(idempotencyLock, old, old);
+    const claim = await claimIdempotency('corrupt_lock_key', 'fingerprint', 'req_corrupt_lock', {});
+    assert.equal(claim.claimed, true);
+    await assert.rejects(() => stat(idempotencyLock), error => error?.code === 'ENOENT');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.HACB_HOME;
+    else process.env.HACB_HOME = previous;
+  }
+});
+
+test('failed atomic writes remove their exact temporary files', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hacb-atomic-cleanup-'));
+  const previous = process.env.HACB_HOME;
+  process.env.HACB_HOME = home;
+  try {
+    for (const [name, write] of [
+      ['json-target', () => atomicWriteJson(join(home, 'json-target'), { private: 'fixture' })],
+      ['text-target', () => atomicWriteText(join(home, 'text-target'), 'private fixture')]
+    ]) {
+      await mkdir(join(home, name));
+      await assert.rejects(write);
+      const leftovers = (await readdir(home)).filter(entry => entry.startsWith(`${name}.`) && entry.endsWith('.tmp'));
+      assert.deepEqual(leftovers, []);
+    }
   } finally {
     await rm(home, { recursive: true, force: true });
     if (previous === undefined) delete process.env.HACB_HOME;

@@ -160,20 +160,28 @@ export async function atomicWriteJson(path, value, mode = 0o600) {
   await ensureStateDir();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
-  await chmod(tmp, mode).catch(() => {});
-  await rename(tmp, path);
-  await chmod(path, mode).catch(() => {});
+  try {
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
+    await chmod(tmp, mode).catch(() => {});
+    await rename(tmp, path);
+    await chmod(path, mode).catch(() => {});
+  } finally {
+    await unlink(tmp).catch(() => {});
+  }
 }
 
 export async function atomicWriteText(path, value, mode = 0o600) {
   await ensureStateDir();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, value, { mode });
-  await chmod(tmp, mode).catch(() => {});
-  await rename(tmp, path);
-  await chmod(path, mode).catch(() => {});
+  try {
+    await writeFile(tmp, value, { mode });
+    await chmod(tmp, mode).catch(() => {});
+    await rename(tmp, path);
+    await chmod(path, mode).catch(() => {});
+  } finally {
+    await unlink(tmp).catch(() => {});
+  }
 }
 
 export async function appendAudit(event) {
@@ -233,18 +241,34 @@ async function withFileLock(path, label, callback) {
         readFile(path, 'utf8')
       ]).then(([info, contents]) => ({
         age: Date.now() - info.mtimeMs,
-        contents
+        contents,
+        ino: info.ino,
+        mtimeMs: info.mtimeMs,
+        size: info.size
       })).catch(() => null);
       const ownerPid = Number.parseInt(observed?.contents.trim().split(/\s+/, 1)[0] || '', 10);
+      const validOwnerPid = Number.isSafeInteger(ownerPid) && ownerPid > 0;
       if (
         observed &&
         observed.age > 30_000 &&
-        Number.isSafeInteger(ownerPid) &&
-        ownerPid > 0 &&
-        !processIsAlive(ownerPid)
+        (!validOwnerPid || !processIsAlive(ownerPid))
       ) {
-        const current = await readFile(path, 'utf8').catch(() => null);
-        if (current === observed.contents) {
+        const current = await Promise.all([
+          stat(path),
+          readFile(path, 'utf8')
+        ]).then(([info, contents]) => ({
+          contents,
+          ino: info.ino,
+          mtimeMs: info.mtimeMs,
+          size: info.size
+        })).catch(() => null);
+        if (
+          current &&
+          current.contents === observed.contents &&
+          current.ino === observed.ino &&
+          current.mtimeMs === observed.mtimeMs &&
+          current.size === observed.size
+        ) {
           await unlink(path).catch(() => {});
           continue;
         }

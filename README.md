@@ -139,7 +139,7 @@ Every HTTP response includes a server-generated `X-Request-Id`. Responses reques
 
 `X-Request-Id` identifies one local HTTP attempt and never trusts a client-supplied value. A durable idempotency replay receives a new header request ID, while the replayed response body retains the originating dispatch ID in `metadata.request_id`.
 
-Callers may send an `Idempotency-Key` header. Identical completed requests replay without another Hyperagent thread while the bridge process remains running; changed request bodies conflict, and in-progress or indeterminate outcomes fail closed. Idempotency response data is intentionally memory-only and expires after 24 hours, so a restart does not claim it can replay an answer it no longer has.
+Callers may send an `Idempotency-Key` header. Identical completed requests replay without another Hyperagent thread, including after a bridge restart; changed request bodies conflict, and in-progress or indeterminate outcomes fail closed. Idempotency records are stored in the private machine-state directory, can contain replayable response output, and expire after 24 hours. They are never written to the sanitized audit log or repository.
 
 Do not remove the `hyperagent_credits` provider block while desktop chats created under it still exist; Codex persists the provider id with each chat.
 
