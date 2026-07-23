@@ -32,7 +32,13 @@ test('OpenAPI response and error schemas retain required contract fields', async
   assert.deepEqual(document.components.schemas.ResponseMetadata.required, ['hyperagent_thread_id', 'request_id', 'usage_source']);
   assert.deepEqual(document.components.schemas.ErrorBody.properties.error.required, ['message', 'type', 'code']);
   assert.ok(document.components.schemas.ErrorBody.properties.error.properties.code.enum.includes('idempotency_indeterminate'));
-  assert.ok(document.paths['/v1/responses'].post.responses['200'].content['text/event-stream']);
+  const success = document.paths['/v1/responses'].post.responses['200'];
+  assert.ok(success.content['text/event-stream']);
+  assert.deepEqual(success.headers['X-Usage-Source'], {
+    $ref: '#/components/headers/UsageSource'
+  });
+  assert.equal(document.components.headers.UsageSource.required, true);
+  assert.equal(document.components.headers.UsageSource.schema.const, 'unavailable');
   assert.ok(document.paths['/v1/responses'].post.responses['409']);
   assert.equal('maxProperties' in document.components.schemas.CreateResponseRequest, false);
   assert.deepEqual(document.components.schemas.CreateResponseRequest.properties.tools.items.oneOf, [
@@ -41,4 +47,7 @@ test('OpenAPI response and error schemas retain required contract fields', async
     { $ref: '#/components/schemas/ToolSearchTool' },
     { $ref: '#/components/schemas/ToolNamespace' }
   ]);
+  assert.deepEqual(document.components.schemas.ToolNamespace.properties.tools.items, {
+    $ref: '#/components/schemas/FunctionTool'
+  });
 });

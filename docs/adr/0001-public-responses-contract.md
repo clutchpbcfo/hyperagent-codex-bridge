@@ -80,6 +80,8 @@ The agent's configured model, effort, tools, budget, native router, and billing 
 
 The adapter accepts the text-first subset described in the OpenAPI document. It sanitizes and bounds retained turns before building one self-contained relay prompt. It maps supported function, custom, and client tool-search actions back to Codex. Unsupported fields are not evidence of OpenAI feature support merely because JSON parsing ignores them.
 
+Tool namespaces may contain function children only. Custom and client tool-search declarations remain supported at the top level, but placing either inside a namespace is invalid and returns HTTP 400 before upstream dispatch; the adapter never silently omits a schema-invalid namespace child.
+
 Each accepted sampling request reserves the persistent daily-request budget before dispatch. A proven pre-dispatch failure releases that reservation. Immediately before `create_thread`, the reservation becomes `dispatching`; success commits it, and an indeterminate outcome remains conservatively committed. On restart, abandoned `reserved` work is released and abandoned `dispatching` work is committed. A reached budget returns HTTP 429. Failure to acquire the local budget lock returns HTTP 503.
 
 ## Response and identifier semantics

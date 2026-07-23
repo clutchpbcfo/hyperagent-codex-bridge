@@ -425,6 +425,24 @@ test('function, custom, tool-search, and namespaced tools retain declaration ord
   });
 });
 
+test('custom tools inside namespaces are rejected before upstream dispatch', async () => {
+  await withTarget({}, async ({ baseUrl, upstream }) => {
+    const response = await postResponse(baseUrl, {
+      model: 'hyperagent/sol-coder',
+      input: 'inspect tools',
+      stream: false,
+      tools: [{
+        type: 'namespace',
+        name: 'invalid',
+        tools: [{ type: 'custom', name: 'must_not_be_silently_dropped' }]
+      }]
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, 'invalid_request');
+    assert.equal(upstream.created.length, 0);
+  });
+});
+
 test('response.incomplete is unsupported and is never emitted as a terminal state', async () => {
   const upstream = new FakeHyperagentUpstream({
     scenarios: [{ kind: 'reply', text: '{"type":"response.incomplete","incomplete_details":{"reason":"max_output"}}' }]

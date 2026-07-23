@@ -67,6 +67,9 @@
                   "minLength": 1
                 }
               },
+              "X-Usage-Source": {
+                "$ref": "#/components/headers/UsageSource"
+              },
               "Cache-Control": {
                 "schema": {
                   "type": "string"
@@ -142,6 +145,14 @@
         "schema": {
           "type": "string",
           "pattern": "^req_[A-Za-z0-9]+$"
+        }
+      },
+      "UsageSource": {
+        "required": true,
+        "description": "Truthful usage provenance for successful responses. The documented HyperAgent MCP tools do not report authoritative usage, so this profile always returns unavailable and omits the response usage object.",
+        "schema": {
+          "type": "string",
+          "const": "unavailable"
         }
       }
     },
@@ -244,6 +255,7 @@
       },
       "ToolNamespace": {
         "type": "object",
+        "description": "Client tool namespace whose children are function tools only. Custom and tool-search tools must be declared at the top level; non-function namespace children are rejected.",
         "required": ["type", "name", "tools"],
         "properties": {
           "type": { "const": "namespace" },
@@ -252,10 +264,7 @@
           "tools": {
             "type": "array",
             "items": {
-              "oneOf": [
-                { "$ref": "#/components/schemas/FunctionTool" },
-                { "$ref": "#/components/schemas/CustomTool" }
-              ]
+              "$ref": "#/components/schemas/FunctionTool"
             }
           }
         },

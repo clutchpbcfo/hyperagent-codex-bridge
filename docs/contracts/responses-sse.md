@@ -14,7 +14,7 @@ data: <one-line JSON serialization of the complete event>
 
 The `event:` value MUST equal the JSON object's `type`. The server MAY emit comment blocks of the form `: hyperagent-running` while the HyperAgent thread is being polled. Comments carry no state and clients MUST ignore them.
 
-The response headers are committed only after HyperAgent returns a thread ID. The response is HTTP 200 with `Content-Type: text/event-stream; charset=utf-8`, `Cache-Control: no-cache, no-transform`, and `X-Hyperagent-Thread-Id`.
+The response headers are committed only after HyperAgent returns a thread ID. The response is HTTP 200 with `Content-Type: text/event-stream; charset=utf-8`, `Cache-Control: no-cache, no-transform`, `X-Hyperagent-Thread-Id`, and `X-Usage-Source: unavailable`.
 
 ## State machine
 
