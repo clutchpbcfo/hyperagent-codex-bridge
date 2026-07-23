@@ -14,7 +14,8 @@ import {
   saveConfig,
   SAFE_MAX_REQUESTS_PER_DAY,
   stateDir,
-  VERSION
+  VERSION,
+  bridgeUrl
 } from './config.mjs';
 import { HyperagentClient } from './hyperagent.mjs';
 import {
@@ -94,7 +95,7 @@ async function printModels(config) {
 }
 
 async function waitForHealth(config, timeoutMs = 8000) {
-  const url = `http://${config.bridgeHost}:${config.bridgePort}/health`;
+  const url = bridgeUrl(config, '/health');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -108,7 +109,7 @@ async function waitForHealth(config, timeoutMs = 8000) {
 
 async function startBackground(config) {
   if (await waitForHealth(config, 500)) {
-    console.log(`Bridge already running on http://${config.bridgeHost}:${config.bridgePort}/v1`);
+    console.log(`Bridge already running on ${bridgeUrl(config, '/v1')}`);
     return;
   }
   const logFile = await open(logPath(), 'a', 0o600);
@@ -121,7 +122,7 @@ async function startBackground(config) {
   child.unref();
   await logFile.close();
   if (!(await waitForHealth(config))) throw new Error(`Bridge did not start. Run hacb serve to see the error. Log: ${logPath()}`);
-  console.log(`Bridge started on http://${config.bridgeHost}:${config.bridgePort}/v1`);
+  console.log(`Bridge started on ${bridgeUrl(config, '/v1')}`);
 }
 
 async function stopBackground() {
@@ -280,7 +281,9 @@ async function main() {
           item.event,
           item.requestId || '',
           item.model || '',
-          item.threadId || '',
+          item.agentRef || '',
+          item.threadRef || '',
+          item.reservationRef || '',
           item.outputType || '',
           item.promptChars ? `promptChars=${item.promptChars}` : '',
           item.dailyUsed ? `daily=${item.dailyUsed}/${item.dailyLimit}` : '',
@@ -326,7 +329,7 @@ async function main() {
       const bridge = new BridgeServer(config);
       await bridge.start();
       await atomicWriteText(pidPath(), `${process.pid}\n`, 0o600);
-      console.log(`Hyperagent Codex Bridge listening on http://${config.bridgeHost}:${config.bridgePort}/v1`);
+      console.log(`Hyperagent Codex Bridge listening on ${bridgeUrl(config, '/v1')}`);
       const shutdown = async () => {
         await bridge.close();
         await rm(pidPath(), { force: true });
@@ -346,7 +349,7 @@ async function main() {
     case 'status': {
       const ok = await waitForHealth(config, 750);
       console.log(ok
-        ? `RUNNING http://${config.bridgeHost}:${config.bridgePort}/v1`
+        ? `RUNNING ${bridgeUrl(config, '/v1')}`
         : `STOPPED (state: ${stateDir()})`);
       process.exitCode = ok ? 0 : 1;
       break;

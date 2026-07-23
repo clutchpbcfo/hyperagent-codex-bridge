@@ -37,7 +37,7 @@ Release 0.4.0 is validated by an automated suite plus real Codex 0.144.6:
 - local bearer authentication, rollback, and sanitized routing audit receipts;
 - secret scan and archive integrity checks.
 
-The public proof target is `hacb audit`: each successful turn produces model and Hyperagent thread IDs without storing prompts, answers, or credentials.
+The public proof target is `hacb audit`: each successful turn produces model and hashed agent/thread references without storing prompts, answers, credentials, or raw private identifiers.
 
 ## Public release
 
@@ -133,9 +133,11 @@ hacb app-status
 hacb audit 12
 ```
 
-The audit log records timestamps, model IDs, Hyperagent thread IDs, and completion type, but never prompts, outputs, or tokens. It is the proof that a Codex App turn traversed the bridge.
+The audit log records timestamps, public model identifiers, hashed agent/thread/reservation references, and completion type, but never prompts, outputs, tokens, or raw private identifiers. It is the proof that a Codex App turn traversed the bridge.
 
 Every HTTP response includes a server-generated `X-Request-Id`. Responses requests also include `X-Usage-Source: unavailable`: Hyperagent's documented MCP thread tools do not currently return authoritative token counts, so the bridge omits the Responses `usage` object instead of fabricating zeros.
+
+`X-Request-Id` identifies one local HTTP attempt and never trusts a client-supplied value. A durable idempotency replay receives a new header request ID, while the replayed response body retains the originating dispatch ID in `metadata.request_id`.
 
 Callers may send an `Idempotency-Key` header. Identical completed requests replay without another Hyperagent thread while the bridge process remains running; changed request bodies conflict, and in-progress or indeterminate outcomes fail closed. Idempotency response data is intentionally memory-only and expires after 24 hours, so a restart does not claim it can replay an answer it no longer has.
 

@@ -47,9 +47,9 @@ Versions: HACB 0.4.0, Node.js v22.22.3, Codex CLI 0.144.6
 - The bridge routed app requests to named Hyperagent agents.
 - Hyperagent returned a Codex client-tool request (`function_call`).
 - Codex executed the local tool and returned its result for a final Hyperagent answer.
-- Hyperagent thread IDs provide an independent audit trail.
+- Hashed Hyperagent thread references provide an independent audit trail without publishing raw thread identifiers.
 - The user observed Hyperagent credits being consumed while Codex subscription quota was not.
 
 ## Privacy
 
-The receipt is safe to publish. It contains timestamps, model slugs, event types, and Hyperagent thread IDs only. It does not contain prompts, outputs, OAuth tokens, refresh tokens, local bridge secrets, or Codex authentication files.
+The receipt is safe to publish. It contains timestamps, model slugs, event types, and hashed Hyperagent references only. It does not contain raw agent/thread/reservation identifiers, prompts, outputs, OAuth tokens, refresh tokens, local bridge secrets, or Codex authentication files.

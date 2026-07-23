@@ -3,10 +3,16 @@ import { createServer } from 'node:http';
 import {
   appendAudit,
   appendGatewayLog,
+  claimIdempotency,
   commitDailyRequestBudget,
+  deleteIdempotency,
   getDailyBudgetStatus,
+  markDailyRequestBudgetDispatching,
+  reconcileDailyRequestBudget,
+  reconcileIdempotency,
   releaseDailyRequestBudget,
   reserveDailyRequestBudget,
+  updateIdempotency,
   VERSION
 } from './config.mjs';
 import { HyperagentClient } from './hyperagent.mjs';
@@ -23,7 +29,31 @@ import {
 } from './protocol.mjs';
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const PUBLIC_ERRORS = Object.freeze({
+  ambiguous_agent_slug: 'The reachable agent catalog cannot be selected safely.',
+  ambiguous_model_alias: 'The configured model aliases cannot be selected safely.',
+  budget_exhausted: 'The local daily request budget is exhausted.',
+  budget_lock_unavailable: 'The local daily request budget is temporarily unavailable.',
+  budget_reservation_invalid: 'The local daily request reservation is unavailable.',
+  client_disconnected: 'The client disconnected and local polling stopped.',
+  duplicate_agent_identifier: 'The reachable agent catalog cannot be selected safely.',
+  duplicate_agent_name: 'The reachable agent catalog contains duplicate names.',
+  idempotency_conflict: 'The Idempotency-Key was already used with a different request body.',
+  idempotency_in_progress: 'The idempotent request is still in progress.',
+  idempotency_indeterminate: 'The idempotent request has an indeterminate upstream outcome.',
+  idempotency_lock_unavailable: 'Local idempotency state is temporarily unavailable.',
+  idempotency_state_invalid: 'Local idempotency state is unavailable.',
+  invalid_agent_catalog: 'The reachable agent catalog cannot be selected safely.',
+  invalid_idempotency_key: 'Idempotency-Key must contain 1 through 255 visible ASCII characters.',
+  invalid_model_alias: 'A configured model alias is invalid or unavailable.',
+  invalid_request: 'The request is invalid.',
+  model_required: 'The model field is required.',
+  prompt_too_large: 'The sanitized relay prompt is too large.',
+  request_too_large: 'The request body is too large.',
+  upstream_timeout: 'The upstream request timed out before a safe result was available.',
+  unknown_model: 'Unknown model identifier. Choose an exact identifier returned by the models endpoint.',
+  unauthorized: 'Missing or invalid local bridge bearer token.'
+});
 
 function json(response, status, value, headers = {}) {
   const body = `${JSON.stringify(value)}\n`;
@@ -48,7 +78,7 @@ function requestId() {
 }
 
 function errorCode(error) {
-  if (typeof error?.code === 'string' && /^[a-z0-9_]{2,80}$/i.test(error.code)) return error.code;
+  if (typeof error?.code === 'string' && PUBLIC_ERRORS[error.code]) return error.code;
   if (error?.name === 'AbortError') return 'client_disconnected';
   if (error?.status === 429) return 'budget_exhausted';
   if (error?.status === 413) return 'request_too_large';
@@ -64,8 +94,14 @@ function abortError() {
 }
 
 function publicErrorMessage(error) {
-  if (Number(error?.status || 500) < 500) return error.message || 'Request failed.';
+  const code = errorCode(error);
+  if (PUBLIC_ERRORS[code]) return PUBLIC_ERRORS[code];
   return 'Hyperagent gateway request failed. Use X-Request-Id to inspect the local structured logs.';
+}
+
+function privateRef(value, prefix) {
+  if (!value) return null;
+  return `${prefix}_${createHash('sha256').update(String(value)).digest('base64url').slice(0, 16)}`;
 }
 
 function loopbackHost(host) {
@@ -88,7 +124,7 @@ function idempotencyKey(request) {
   const value = request.headers['idempotency-key'];
   if (value == null) return null;
   if (Array.isArray(value) || !/^[\x21-\x7e]{1,255}$/.test(value)) {
-    throw Object.assign(new Error('Idempotency-Key must be 1-255 visible ASCII characters.'), { status: 400, code: 'invalid_idempotency_key' });
+    throw Object.assign(new Error('Invalid Idempotency-Key.'), { status: 400, code: 'invalid_idempotency_key' });
   }
   return createHash('sha256').update(value).digest('base64url');
 }
@@ -143,27 +179,37 @@ function etagFor(value) {
 }
 
 export class BridgeServer {
-  constructor(config, { clientFactory, auditWriter, logWriter, budgetGuard, budgetManager } = {}) {
+  constructor(config, { clientFactory, auditWriter, logWriter, budgetGuard, budgetManager, idempotencyManager } = {}) {
     this.config = config;
     this.server = null;
     this.agentCache = { at: 0, agents: [] };
-    this.idempotency = new Map();
     this.clientFactory = clientFactory || (() => new HyperagentClient(this.config));
     this.auditWriter = auditWriter || appendAudit;
     this.logWriter = logWriter || appendGatewayLog;
     this.budgetManager = budgetManager || (budgetGuard
       ? {
           reserve: async configValue => ({ id: null, ...await budgetGuard(configValue) }),
+          dispatch: async reservation => reservation,
           commit: async reservation => reservation,
           release: async reservation => reservation,
-          status: getDailyBudgetStatus
+          status: getDailyBudgetStatus,
+          reconcile: async configValue => getDailyBudgetStatus(configValue)
         }
       : {
           reserve: reserveDailyRequestBudget,
+          dispatch: (reservation, configValue) => markDailyRequestBudgetDispatching(reservation.id, configValue),
           commit: (reservation, configValue) => commitDailyRequestBudget(reservation.id, configValue),
           release: (reservation, configValue, options) => releaseDailyRequestBudget(reservation.id, configValue, options),
-          status: getDailyBudgetStatus
+          status: getDailyBudgetStatus,
+          reconcile: reconcileDailyRequestBudget
         });
+    if (!this.budgetManager.dispatch) this.budgetManager.dispatch = async reservation => reservation;
+    this.idempotencyManager = idempotencyManager || {
+      claim: claimIdempotency,
+      update: updateIdempotency,
+      delete: deleteIdempotency,
+      reconcile: reconcileIdempotency
+    };
   }
 
   async safeAudit(event) {
@@ -172,13 +218,6 @@ export class BridgeServer {
 
   async safeLog(event) {
     await this.logWriter(event).catch(() => {});
-  }
-
-  pruneIdempotency() {
-    const cutoff = Date.now() - IDEMPOTENCY_TTL_MS;
-    for (const [key, item] of this.idempotency) {
-      if (item.at < cutoff) this.idempotency.delete(key);
-    }
   }
 
   async getAgents({ fresh = false } = {}) {
@@ -248,29 +287,29 @@ export class BridgeServer {
   async handleResponses(request, response, serverRequestId) {
     const body = await readJson(request);
     if (!body.model) throw Object.assign(new Error('The model field is required.'), { status: 400, code: 'model_required' });
-    this.pruneIdempotency();
     const keyHash = idempotencyKey(request);
     const fingerprint = requestFingerprint(body);
-    const previous = keyHash ? this.idempotency.get(keyHash) : null;
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) {
-        throw Object.assign(new Error('Idempotency-Key was already used with a different request body.'), { status: 409, code: 'idempotency_conflict' });
-      }
-      if (previous.state === 'completed') {
+    let idempotencyClaimed = false;
+    if (keyHash) {
+      const claim = await this.idempotencyManager.claim(keyHash, fingerprint, serverRequestId, this.config);
+      const previous = claim.claimed ? null : claim.record;
+      idempotencyClaimed = claim.claimed;
+      if (!previous) {
+        // The durable claim belongs to this request.
+      } else if (previous.fingerprint !== fingerprint) {
+        throw Object.assign(new Error('Idempotency conflict.'), { status: 409, code: 'idempotency_conflict' });
+      } else if (previous.state === 'completed') {
         await this.safeLog({ event: 'idempotency_replayed', requestId: serverRequestId, originalRequestId: previous.requestId });
         this.renderCompleted(response, previous.result, { replayed: true });
         return;
+      } else {
+        throw Object.assign(new Error('Idempotent request outcome is unavailable for replay.'), {
+          status: 409,
+          code: previous.state === 'in_progress' ? 'idempotency_in_progress' : 'idempotency_indeterminate',
+          headers: { 'retry-after': '2' }
+        });
       }
-      throw Object.assign(new Error(`Idempotent request cannot be repeated while its outcome is ${previous.state}. Original request ID: ${previous.requestId}.`), {
-        status: 409,
-        code: previous.state === 'in_progress' ? 'idempotency_in_progress' : 'idempotency_indeterminate',
-        headers: { 'retry-after': '2' }
-      });
     }
-    const idempotencyRecord = keyHash
-      ? { fingerprint, state: 'in_progress', requestId: serverRequestId, at: Date.now() }
-      : null;
-    if (keyHash) this.idempotency.set(keyHash, idempotencyRecord);
     const abort = new AbortController();
     const cancel = () => {
       if (!abort.signal.aborted) abort.abort(abortError());
@@ -287,58 +326,72 @@ export class BridgeServer {
     let threadId;
     let keepalive;
     let dispatched = false;
+    let budgetCommitted = false;
     let agents;
     try {
       agents = await this.getAgents();
     } catch (error) {
-      if (keyHash) this.idempotency.delete(keyHash);
+      if (idempotencyClaimed) await this.idempotencyManager.delete(keyHash, serverRequestId);
       throw error;
     }
     try {
       agent = resolveAgent(body.model, agents, this.config);
     } catch (error) {
-      if (keyHash) this.idempotency.delete(keyHash);
-      error.status = 400;
-      error.code = 'unknown_model';
+      if (idempotencyClaimed) await this.idempotencyManager.delete(keyHash, serverRequestId);
       throw error;
     }
     let tools;
     let prompt;
+    const auditModel = body.model === agent.id ? privateRef(agent.id, 'agent') : body.model;
     try {
       tools = extractClientTools(body, this.config);
       prompt = buildRelayPrompt(body, agent, this.config, tools);
     } catch (error) {
-      if (keyHash) this.idempotency.delete(keyHash);
+      if (idempotencyClaimed) await this.idempotencyManager.delete(keyHash, serverRequestId);
       throw error;
     }
     if (prompt.length > Math.max(10000, Number(this.config.maxPromptChars || 70000))) {
-      if (keyHash) this.idempotency.delete(keyHash);
+      if (idempotencyClaimed) await this.idempotencyManager.delete(keyHash, serverRequestId);
       throw Object.assign(new Error(`Sanitized relay prompt is still too large (${prompt.length} chars). Start a new Codex chat or reduce attached context.`), { status: 413, code: 'prompt_too_large' });
     }
     const ids = responseIds();
-    const streaming = body.stream === true;
+    const streaming = body.stream !== false;
     try {
       if (abort.signal.aborted) throw abort.signal.reason;
       reservation = await this.budgetManager.reserve(this.config, { requestId: serverRequestId });
       await this.safeAudit({
         event: 'request_reserved',
         requestId: serverRequestId,
-        model: body.model,
-        agentId: agent.id,
+        model: auditModel,
+        agentRef: privateRef(agent.id, 'agent'),
         streaming,
         promptChars: prompt.length,
         toolCount: tools.length,
         dailyUsed: reservation.used,
         dailyLimit: reservation.limit,
-        budgetReservationId: reservation.id
+        reservationRef: privateRef(reservation.id, 'reservation')
       });
       if (abort.signal.aborted) throw abort.signal.reason;
       client = this.clientFactory();
       if (abort.signal.aborted) throw abort.signal.reason;
-      budget = await this.budgetManager.commit(reservation, this.config);
+      if (idempotencyClaimed) {
+        await this.idempotencyManager.update(keyHash, serverRequestId, { state: 'indeterminate' }, this.config);
+      }
+      await this.budgetManager.dispatch(reservation, this.config);
       dispatched = true;
-      threadId = await client.createThread(agent.id, prompt, { signal: abort.signal });
-      await this.safeAudit({ event: 'thread_created', requestId: serverRequestId, model: body.model, agentId: agent.id, threadId });
+      threadId = await client.createThread(agent.id, prompt, {
+        signal: abort.signal,
+        timeoutMs: this.config.createThreadTimeoutMs
+      });
+      budget = await this.budgetManager.commit(reservation, this.config);
+      budgetCommitted = true;
+      await this.safeAudit({
+        event: 'thread_created',
+        requestId: serverRequestId,
+        model: auditModel,
+        agentRef: privateRef(agent.id, 'agent'),
+        threadRef: privateRef(threadId, 'thread')
+      });
       if (streaming) {
         response.writeHead(200, {
           'content-type': 'text/event-stream; charset=utf-8',
@@ -372,40 +425,46 @@ export class BridgeServer {
       await this.safeAudit({
         event: 'completed',
         requestId: serverRequestId,
-        model: body.model,
-        agentId: agent.id,
-        threadId,
+        model: auditModel,
+        agentRef: privateRef(agent.id, 'agent'),
+        threadRef: privateRef(threadId, 'thread'),
         outputType: output.type,
         dailyCommitted: budget.committed,
         dailyLimit: budget.limit,
         usageSource: 'unavailable'
       });
-      if (idempotencyRecord) {
-        idempotencyRecord.state = 'completed';
-        idempotencyRecord.result = completed;
-        idempotencyRecord.at = Date.now();
+      if (idempotencyClaimed) {
+        await this.idempotencyManager.update(keyHash, serverRequestId, {
+          state: 'completed',
+          result: completed
+        }, this.config);
       }
       this.renderCompleted(response, completed, { createdSent: streaming });
     } catch (error) {
       const code = errorCode(error);
-      if (reservation && !dispatched) {
-        await this.budgetManager.release(reservation, this.config, { reason: code }).catch(() => {});
+      const provenPreDispatch = error?.dispatchState === 'not_dispatched';
+      if (provenPreDispatch) dispatched = false;
+      if (reservation && (!dispatched || provenPreDispatch)) {
+        await this.budgetManager.release(reservation, this.config, { reason: code, provenPreDispatch }).catch(() => {});
+      } else if (reservation && dispatched && !budgetCommitted) {
+        await this.budgetManager.commit(reservation, this.config).then(() => { budgetCommitted = true; }).catch(() => {});
       }
-      if (idempotencyRecord) {
+      if (idempotencyClaimed) {
         if (dispatched) {
-          idempotencyRecord.state = 'indeterminate';
-          idempotencyRecord.threadId = threadId || null;
-          idempotencyRecord.at = Date.now();
+          await this.idempotencyManager.update(keyHash, serverRequestId, {
+            state: 'indeterminate',
+            threadId: threadId || null
+          }, this.config).catch(() => {});
         } else {
-          this.idempotency.delete(keyHash);
+          await this.idempotencyManager.delete(keyHash, serverRequestId).catch(() => {});
         }
       }
       await this.safeAudit({
         event: code === 'client_disconnected' ? 'cancelled' : 'failed',
         requestId: serverRequestId,
-        model: body.model,
-        agentId: agent.id,
-        threadId: threadId || null,
+        model: auditModel,
+        agentRef: privateRef(agent.id, 'agent'),
+        threadRef: privateRef(threadId, 'thread'),
         errorCode: code,
         dispatched,
         cancellationScope: code === 'client_disconnected' ? 'local_polling_only' : undefined
@@ -448,7 +507,7 @@ export class BridgeServer {
   }
 
   async route(request, response, serverRequestId) {
-    const url = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
+    const url = new URL(request.url || '/', 'http://localhost');
     if (request.method === 'GET' && (url.pathname === '/health' || url.pathname === '/v1/health')) {
       json(response, 200, { ok: true, service: 'hyperagent-codex-bridge', version: VERSION });
       return;
@@ -471,7 +530,7 @@ export class BridgeServer {
       await this.handleResponses(request, response, serverRequestId);
       return;
     }
-    apiError(response, 404, `Unknown route ${request.method} ${url.pathname}`, 'not_found');
+    apiError(response, 404, 'The requested local gateway route does not exist.', 'not_found');
   }
 
   async start() {
@@ -479,6 +538,10 @@ export class BridgeServer {
     if (!loopbackHost(this.config.bridgeHost)) {
       throw new Error(`Refusing to bind the gateway to non-loopback host '${this.config.bridgeHost}'. Use 127.0.0.1 or ::1.`);
     }
+    await Promise.all([
+      this.budgetManager.reconcile ? this.budgetManager.reconcile(this.config) : this.budgetManager.status(this.config),
+      this.idempotencyManager.reconcile(this.config)
+    ]);
     this.server = createServer((request, response) => {
       const serverRequestId = requestId();
       const startedAt = Date.now();

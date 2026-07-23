@@ -128,15 +128,21 @@ export class HyperagentClient {
     return normalizeAgents(await this.mcp.callTool('list_agents', {}));
   }
 
-  async createThread(agentId, message, { signal } = {}) {
-    const decoded = decodeToolResult(await this.mcp.callTool('create_thread', { agentId, message }, { signal }));
+  async createThread(agentId, message, { signal, timeoutMs } = {}) {
+    const decoded = decodeToolResult(await this.mcp.callTool('create_thread', { agentId, message }, {
+      signal,
+      timeoutMs: timeoutMs || this.config.createThreadTimeoutMs
+    }));
     const threadId = findThreadId(decoded);
     if (!threadId) throw new Error(`Hyperagent create_thread did not return a threadId: ${JSON.stringify(decoded).slice(0, 1000)}`);
     return threadId;
   }
 
-  async getThread(threadId, { signal } = {}) {
-    return decodeToolResult(await this.mcp.callTool('get_thread', { threadId }, { signal }));
+  async getThread(threadId, { signal, timeoutMs } = {}) {
+    return decodeToolResult(await this.mcp.callTool('get_thread', { threadId }, {
+      signal,
+      timeoutMs: timeoutMs || this.config.mcpRequestTimeoutMs
+    }));
   }
 
   async waitForThread(threadId, { signal, onProgress } = {}) {
@@ -144,7 +150,11 @@ export class HyperagentClient {
     let previousStatus = '';
     while (Date.now() - started < this.config.runTimeoutMs) {
       if (signal?.aborted) throw signal.reason || Object.assign(new Error('Request aborted.'), { code: 'client_disconnected' });
-      const thread = await this.getThread(threadId, { signal });
+      const remainingMs = this.config.runTimeoutMs - (Date.now() - started);
+      const thread = await this.getThread(threadId, {
+        signal,
+        timeoutMs: Math.max(1, Math.min(this.config.mcpRequestTimeoutMs, remainingMs))
+      });
       const status = statusOf(thread) || 'unknown';
       if (status !== previousStatus) onProgress?.(status, thread);
       previousStatus = status;

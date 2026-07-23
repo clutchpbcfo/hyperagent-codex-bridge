@@ -26,7 +26,23 @@ test('aliases and generated slugs resolve to agents', () => {
   const config = { aliases: { 'hyperagent/sol': agents[0].id }, defaultAgentId: null };
   assert.equal(resolveAgent('hyperagent/sol', agents, config).id, agents[0].id);
   assert.equal(resolveAgent('hyperagent/fable-coder', agents, config).id, agents[1].id);
-  assert.throws(() => resolveAgent('hyperagent/missing', agents, config), /Unknown Hyperagent model/);
+  assert.throws(() => resolveAgent('hyperagent/missing', agents, config), /Unknown model identifier/);
+});
+
+test('model selection fails closed for fallbacks, duplicate names, and ambiguous aliases', () => {
+  assert.throws(() => resolveAgent('missing', agents, {
+    aliases: {}, defaultAgentId: agents[0].id
+  }), error => error.code === 'unknown_model');
+  assert.throws(() => buildAgentModels([
+    agents[0],
+    { ...agents[1], name: 'sol coder' }
+  ]), error => error.code === 'duplicate_agent_name');
+  assert.throws(() => resolveAgent('hyperagent/sol-coder', agents, {
+    aliases: { 'hyperagent/sol-coder': agents[1].id }
+  }), error => error.code === 'ambiguous_model_alias');
+  assert.throws(() => resolveAgent('hyperagent/sol', agents, {
+    aliases: { 'hyperagent/sol': 'unknown-agent' }
+  }), error => error.code === 'invalid_model_alias');
 });
 
 test('relay prompt strips injected context, bounds history, and defaults to low effort', () => {

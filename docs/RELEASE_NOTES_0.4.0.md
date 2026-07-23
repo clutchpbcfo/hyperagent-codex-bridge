@@ -13,7 +13,7 @@ The first public proof-of-work release.
 - Reversible `hacb app-on` / `hacb app-off` workflow for Codex App.
 - Global `$hyperagent-codex-bridge` skill and Codex plugin manifest.
 - macOS and Windows/Ryzen setup guides.
-- Sanitized `hacb audit` receipts with Hyperagent thread IDs.
+- Sanitized `hacb audit` receipts with hashed Hyperagent thread references.
 - 19 passing tests, including real Codex CLI 0.144.6 provider, local tool-loop, and main-config App Mode runs.
 
 ## Live validation

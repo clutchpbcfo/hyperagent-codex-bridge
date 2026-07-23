@@ -1,6 +1,6 @@
 import { access, chmod, mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { atomicWriteText, ensureStateDir, modelCatalogPath } from './config.mjs';
+import { atomicWriteText, bridgeUrl, ensureStateDir, modelCatalogPath } from './config.mjs';
 import { codexHome, generateCatalog } from './install.mjs';
 
 const ACTIVE_BEGIN = '# BEGIN Hyperagent Codex Bridge app mode';
@@ -106,7 +106,7 @@ function removeRootSelections(text) {
 }
 
 function providerBlock(config) {
-  const baseUrl = `http://${config.bridgeHost}:${config.bridgePort}/v1`;
+  const baseUrl = bridgeUrl(config, '/v1');
   return [
     PROVIDER_BEGIN,
     `[model_providers.${config.codexProviderId}]`,
@@ -135,7 +135,7 @@ function activeBlock(config, model) {
 }
 
 export async function activateAppMode(config, { model, agents = null } = {}) {
-  if (config.bridgeHost !== '127.0.0.1' && config.bridgeHost !== 'localhost') {
+  if (!['127.0.0.1', 'localhost', '::1'].includes(config.bridgeHost)) {
     throw new Error('App Mode requires the bridge to bind to loopback.');
   }
   await ensureStateDir();

@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { BridgeServer } from '../src/bridge.mjs';
+import { createMemoryIdempotencyManager } from './support/memory-state.mjs';
 
 const execFileAsync = promisify(execFile);
 const agent = { id: 'agent-sol-123456', name: 'Sol Coder', description: 'Mock agent', model: 'openai/gpt-5.6-sol' };
@@ -28,7 +29,8 @@ async function withMockBridge(callback) {
     }),
     auditWriter: async () => {},
     logWriter: async () => {},
-    budgetGuard: async () => ({ used: 1, committed: 1, reserved: 0, limit: 6, remaining: 5 })
+    budgetGuard: async () => ({ used: 1, committed: 1, reserved: 0, limit: 6, remaining: 5 }),
+    idempotencyManager: createMemoryIdempotencyManager()
   });
   await bridge.start();
   try {

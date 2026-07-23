@@ -48,7 +48,7 @@ I then added App Mode for the desktop client. Codex App does not yet expose CLI 
 hacb app-off
 ```
 
-The project also emits sanitized routing receipts. `hacb audit` shows the model slug, Hyperagent thread ID, and completion type without storing prompts, answers, or credentials. That turns the integration from a screenshot claim into something auditable.
+The project also emits sanitized routing receipts. `hacb audit` shows the model slug, a hashed Hyperagent thread reference, and completion type without storing prompts, answers, credentials, or raw private identifiers. That turns the integration from a screenshot claim into something auditable.
 
 The public release includes:
 
