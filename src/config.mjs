@@ -208,17 +208,34 @@ function dailyLimit(config) {
 async function withFileLock(path, label, callback) {
   await ensureStateDir();
   const deadline = Date.now() + 5000;
+  const owner = `${process.pid} ${randomUUID()}\n`;
   let handle;
   while (!handle) {
     try {
       handle = await open(path, 'wx', 0o600);
-      await handle.writeFile(`${process.pid} ${Date.now()}\n`);
+      await handle.writeFile(owner);
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
-      const age = await stat(path).then(info => Date.now() - info.mtimeMs).catch(() => 0);
-      if (age > 30_000) {
-        await unlink(path).catch(() => {});
-        continue;
+      const observed = await Promise.all([
+        stat(path),
+        readFile(path, 'utf8')
+      ]).then(([info, contents]) => ({
+        age: Date.now() - info.mtimeMs,
+        contents
+      })).catch(() => null);
+      const ownerPid = Number.parseInt(observed?.contents.trim().split(/\s+/, 1)[0] || '', 10);
+      if (
+        observed &&
+        observed.age > 30_000 &&
+        Number.isSafeInteger(ownerPid) &&
+        ownerPid > 0 &&
+        !processIsAlive(ownerPid)
+      ) {
+        const current = await readFile(path, 'utf8').catch(() => null);
+        if (current === observed.contents) {
+          await unlink(path).catch(() => {});
+          continue;
+        }
       }
       if (Date.now() >= deadline) {
         throw Object.assign(new Error(`Could not acquire the ${label} lock.`), { status: 503, code: `${label}_lock_unavailable` });
@@ -230,7 +247,8 @@ async function withFileLock(path, label, callback) {
     return await callback();
   } finally {
     await handle.close().catch(() => {});
-    await unlink(path).catch(() => {});
+    const current = await readFile(path, 'utf8').catch(() => null);
+    if (current === owner) await unlink(path).catch(() => {});
   }
 }
 

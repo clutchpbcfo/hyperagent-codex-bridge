@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -149,6 +149,46 @@ test('daily request budget is enforced across independent processes', async () =
     }
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('an old lock owned by a live process remains fail closed', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hacb-live-lock-'));
+  const previous = process.env.HACB_HOME;
+  process.env.HACB_HOME = home;
+  try {
+    const lock = join(home, 'usage.lock');
+    await writeFile(lock, `${process.pid} live-owner\n`, { mode: 0o600 });
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    await assert.rejects(
+      () => consumeDailyRequestBudget({ maxRequestsPerDay: 1 }),
+      /Could not acquire the budget lock/
+    );
+    assert.equal(await readFile(lock, 'utf8'), `${process.pid} live-owner\n`);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.HACB_HOME;
+    else process.env.HACB_HOME = previous;
+  }
+});
+
+test('an old lock owned by a dead process is recovered', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hacb-dead-lock-'));
+  const previous = process.env.HACB_HOME;
+  process.env.HACB_HOME = home;
+  try {
+    const lock = join(home, 'usage.lock');
+    await writeFile(lock, '2147483647 dead-owner\n', { mode: 0o600 });
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    const status = await consumeDailyRequestBudget({ maxRequestsPerDay: 1 });
+    assert.equal(status.used, 1);
+    await assert.rejects(() => stat(lock), error => error?.code === 'ENOENT');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.HACB_HOME;
+    else process.env.HACB_HOME = previous;
   }
 });
 
