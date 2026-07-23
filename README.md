@@ -25,6 +25,17 @@ Codex CLI / App
 
 The bridge maps Codex function/custom-tool calls back to Codex, so shell commands, patches, file reads, and approvals remain local to Codex.
 
+## Public Responses contract
+
+The v0.4.2 adapter's intentionally narrow public contract is executable and source-controlled:
+
+- [`docs/adr/0001-public-responses-contract.md`](docs/adr/0001-public-responses-contract.md) defines auth, agent selection, errors, identifiers, idempotency, cancellation, usage, billing, and ownership boundaries;
+- [`spec/openapi.json`](spec/openapi.json) is the OpenAPI 3.1 description for `POST /v1/responses`;
+- [`docs/contracts/responses-sse.md`](docs/contracts/responses-sse.md) defines the exact SSE event-order state machine; and
+- [`test/conformance/`](test/conformance/) runs the public HTTP surface against fake upstreams without credentials, models, or credits.
+
+This is a Responses compatibility profile, not the complete OpenAI Responses API and not a native Hyperagent inference API. In particular, SSE is framed by this adapter after a Hyperagent thread completes; usage is omitted because it is not reported; idempotency is bounded, durable, and local rather than provider-backed; and disconnecting stops local polling but does not claim to cancel native Hyperagent work.
+
 ## Proof of work
 
 Release 0.4.0 is validated by an automated suite plus real Codex 0.144.6:

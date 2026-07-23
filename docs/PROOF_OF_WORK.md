@@ -30,6 +30,8 @@ The repository test suite covers:
 - agent discovery and stable model slug generation;
 - Codex model catalog generation;
 - Responses streaming and non-streaming output;
+- the versioned OpenAPI 3.1 document and exact SSE event order;
+- local auth, model/agent selection, JSON/SSE errors, identifier, idempotency, cancellation, and usage semantics through black-box fake-upstream conformance tests;
 - function/custom-tool mapping;
 - a real Codex CLI provider run;
 - a real Codex local shell-tool round trip;

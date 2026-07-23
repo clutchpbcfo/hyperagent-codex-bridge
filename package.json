@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "lint:openapi": "redocly lint spec/openapi.json",
     "start": "node ./src/cli.mjs serve",
     "doctor": "node ./src/cli.mjs doctor"
   },
@@ -17,6 +18,7 @@
   "license": "MIT",
   "private": true,
   "devDependencies": {
+    "@redocly/cli": "2.40.0",
     "openai": "^6.48.0"
   }
 }

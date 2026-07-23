@@ -60,6 +60,7 @@ jobs:
       - run: npm ci
       - name: Syntax checks
         run: find src test fixtures -name '*.mjs' -print0 | xargs -0 -n1 node --check
+      - run: npm run lint:openapi
       - run: npm audit --omit=dev
       - run: npm pack --dry-run
       - run: git diff --check origin/${{ github.base_ref || 'main' }}...HEAD
