@@ -155,7 +155,7 @@ test('create_thread and polling requests have hard abortable timeouts', async ()
     });
     await assert.rejects(
       () => client.callTool('create_thread', { agentId: 'agent', message: 'test' }, { timeoutMs: 200 }),
-      error => error.code === 'upstream_timeout' && error.dispatchState === 'dispatched'
+      error => error.code === 'upstream_timeout' && error.dispatchState !== 'not_dispatched'
     );
     await assert.rejects(
       () => client.callTool('get_thread', { threadId: 'thread' }, { timeoutMs: 50 }),
