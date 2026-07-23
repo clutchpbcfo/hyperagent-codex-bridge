@@ -11,46 +11,84 @@ export function slugify(value) {
 }
 
 export function buildAgentModels(agents) {
-  const used = new Map();
+  validateAgentCatalog(agents);
   return agents.map((agent, index) => {
     const base = slugify(agent.name);
-    const count = (used.get(base) || 0) + 1;
-    used.set(base, count);
-    const suffix = count === 1 ? '' : `-${String(agent.id).slice(-6)}`;
     return {
       agent,
-      slug: `hyperagent/${base}${suffix}`,
+      slug: `hyperagent/${base}`,
       displayName: agent.model ? `${agent.name} · ${agent.model}` : agent.name,
       priority: index + 1
     };
   });
 }
 
-export function resolveAgent(model, agents, config) {
-  const requested = String(model || '').trim();
-  const alias = config.aliases?.[requested];
-  if (alias) {
-    const matched = agents.find(agent => agent.id === alias);
-    if (matched) return matched;
-    throw new Error(`Model alias ${requested} points to unavailable agent ${alias}.`);
+function selectionError(message, code) {
+  return Object.assign(new Error(message), { status: 400, code });
+}
+
+export function validateAgentCatalog(agents) {
+  const ids = new Set();
+  const names = new Set();
+  const slugs = new Set();
+  for (const agent of agents) {
+    const id = String(agent?.id || '').trim();
+    const name = String(agent?.name || '').trim();
+    const foldedName = name.toLocaleLowerCase('en-US');
+    const slug = slugify(name);
+    if (!id || !name) throw selectionError('The reachable agent catalog contains an invalid entry.', 'invalid_agent_catalog');
+    if (ids.has(id)) throw selectionError('The reachable agent catalog contains duplicate identifiers.', 'duplicate_agent_identifier');
+    if (names.has(foldedName)) throw selectionError('The reachable agent catalog contains duplicate names.', 'duplicate_agent_name');
+    if (slugs.has(slug)) throw selectionError('The reachable agent catalog contains ambiguous names.', 'ambiguous_agent_slug');
+    ids.add(id);
+    names.add(foldedName);
+    slugs.add(slug);
   }
+  return agents;
+}
+
+function validatedAliases(agents, config) {
+  const byId = new Map(agents.map(agent => [agent.id, agent]));
+  const natural = new Map();
+  for (const agent of agents) {
+    for (const identifier of [agent.id, agent.name, `hyperagent/${slugify(agent.name)}`]) {
+      natural.set(String(identifier).toLocaleLowerCase('en-US'), agent.id);
+    }
+  }
+  const aliases = new Map();
+  const folded = new Map();
+  for (const [rawAlias, rawAgentId] of Object.entries(config.aliases || {})) {
+    const alias = String(rawAlias || '').trim();
+    const agentId = String(rawAgentId || '').trim();
+    const agent = byId.get(agentId);
+    if (!alias || !agent) throw selectionError('A configured model alias is invalid or unavailable.', 'invalid_model_alias');
+    const key = alias.toLocaleLowerCase('en-US');
+    if (folded.has(key) && folded.get(key) !== agentId) {
+      throw selectionError('Configured model aliases are ambiguous.', 'ambiguous_model_alias');
+    }
+    if (natural.has(key) && natural.get(key) !== agentId) {
+      throw selectionError('A configured model alias conflicts with another model identifier.', 'ambiguous_model_alias');
+    }
+    folded.set(key, agentId);
+    aliases.set(alias, agent);
+  }
+  return aliases;
+}
+
+export function resolveAgent(model, agents, config) {
+  validateAgentCatalog(agents);
+  const requested = String(model || '').trim();
+  const aliases = validatedAliases(agents, config);
+  if (aliases.has(requested)) return aliases.get(requested);
 
   const models = buildAgentModels(agents);
   const bySlug = models.find(item => item.slug === requested);
   if (bySlug) return bySlug.agent;
   const direct = agents.find(agent => agent.id === requested);
   if (direct) return direct;
-  const tail = requested.replace(/^hyperagent\//, '');
-  const byName = agents.find(agent =>
-    agent.name.toLowerCase() === requested.toLowerCase() ||
-    slugify(agent.name) === tail
-  );
+  const byName = agents.find(agent => agent.name === requested);
   if (byName) return byName;
-  if (config.defaultAgentId) {
-    const fallback = agents.find(agent => agent.id === config.defaultAgentId);
-    if (fallback) return fallback;
-  }
-  throw new Error(`Unknown Hyperagent model '${requested}'. Run hacb models and choose one of the listed model IDs.`);
+  throw selectionError('Unknown model identifier. Choose an exact identifier returned by the models endpoint.', 'unknown_model');
 }
 
 export function modelInfo(item) {
@@ -358,8 +396,17 @@ export function responseIds() {
   return { responseId: `resp_${id}`, itemId: `msg_${id}`, callId: `call_${id}` };
 }
 
-export function sseEvents(output, ids, { model, threadId } = {}) {
-  const response = { id: ids.responseId, status: 'in_progress', model, output: [], metadata: { hyperagent_thread_id: threadId } };
+function responseMetadata(threadId, requestId) {
+  return {
+    hyperagent_thread_id: threadId,
+    ...(requestId ? { request_id: requestId } : {}),
+    usage_source: 'unavailable'
+  };
+}
+
+export function sseEvents(output, ids, { model, threadId, requestId } = {}) {
+  const metadata = responseMetadata(threadId, requestId);
+  const response = { id: ids.responseId, status: 'in_progress', model, output: [], metadata };
   const events = [{ type: 'response.created', response }];
   if (output.type === 'function_call') {
     events.push({
@@ -393,14 +440,13 @@ export function sseEvents(output, ids, { model, threadId } = {}) {
       id: ids.responseId,
       status: 'completed',
       model,
-      metadata: { hyperagent_thread_id: threadId },
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+      metadata
     }
   });
   return events;
 }
 
-export function nonStreamingResponse(output, ids, { model, threadId } = {}) {
+export function nonStreamingResponse(output, ids, { model, threadId, requestId } = {}) {
   const item = output.type === 'function_call'
     ? { type: 'function_call', call_id: ids.callId, name: output.name, arguments: output.arguments }
     : output.type === 'custom_tool_call'
@@ -414,7 +460,6 @@ export function nonStreamingResponse(output, ids, { model, threadId } = {}) {
     status: 'completed',
     model,
     output: [item],
-    metadata: { hyperagent_thread_id: threadId },
-    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+    metadata: responseMetadata(threadId, requestId)
   };
 }

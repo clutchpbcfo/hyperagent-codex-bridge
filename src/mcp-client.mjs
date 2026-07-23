@@ -1,6 +1,26 @@
 import { getAccessToken } from './oauth.mjs';
 import { VERSION } from './config.mjs';
 
+function timeoutError() {
+  return Object.assign(new Error('The upstream request timed out.'), { status: 504, code: 'upstream_timeout' });
+}
+
+function boundedSignal(signal, timeoutMs) {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal.reason);
+  if (signal?.aborted) controller.abort(signal.reason);
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(timeoutError()), Math.max(1, Number(timeoutMs) || 30_000));
+  timer.unref?.();
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+  };
+}
+
 function parseSse(text, expectedId) {
   const messages = [];
   for (const block of text.split(/\r?\n\r?\n/)) {
@@ -60,7 +80,7 @@ export class McpClient {
     this.initialized = false;
   }
 
-  async request(method, params, { notification = false } = {}) {
+  async request(method, params, { notification = false, signal, timeoutMs } = {}) {
     const id = notification ? undefined : this.nextId++;
     const payload = {
       jsonrpc: '2.0',
@@ -68,7 +88,15 @@ export class McpClient {
       method,
       ...(params === undefined ? {} : { params })
     };
-    const token = await getAccessToken(this.config);
+    const bounded = boundedSignal(signal, timeoutMs || this.config.mcpRequestTimeoutMs);
+    let token;
+    try {
+      token = await getAccessToken(this.config, { signal: bounded.signal });
+    } catch (error) {
+      bounded.cleanup();
+      if (!error.dispatchState) error.dispatchState = 'not_dispatched';
+      throw error;
+    }
     const headers = {
       authorization: `Bearer ${token}`,
       accept: 'application/json, text/event-stream',
@@ -78,15 +106,39 @@ export class McpClient {
     };
     if (this.sessionId) headers['mcp-session-id'] = this.sessionId;
 
-    const response = await fetch(this.config.mcpUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
-    });
+    let response;
+    try {
+      if (bounded.signal.aborted) {
+        const error = bounded.signal.reason || timeoutError();
+        error.dispatchState = 'not_dispatched';
+        throw error;
+      }
+      response = await fetch(this.config.mcpUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: bounded.signal
+      });
+    } catch (error) {
+      bounded.cleanup();
+      if (!error.dispatchState) error.dispatchState = 'indeterminate';
+      throw error;
+    }
     const newSessionId = response.headers.get('mcp-session-id');
     if (newSessionId) this.sessionId = newSessionId;
-    if (notification && response.status === 202) return null;
-    const text = await response.text();
+    if (notification && response.status === 202) {
+      bounded.cleanup();
+      return null;
+    }
+    let text;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (!error.dispatchState) error.dispatchState = 'dispatched';
+      throw error;
+    } finally {
+      bounded.cleanup();
+    }
     if (response.status === 401) {
       throw new Error('Hyperagent authorization was rejected. Run hacb login again.');
     }
@@ -106,15 +158,15 @@ export class McpClient {
     return envelope.result;
   }
 
-  async connect() {
+  async connect({ signal } = {}) {
     if (this.initialized) return this;
     const result = await this.request('initialize', {
       protocolVersion: this.protocolVersion,
       capabilities: {},
       clientInfo: { name: 'hyperagent-codex-bridge', version: VERSION }
-    });
+    }, { signal });
     if (result?.protocolVersion) this.protocolVersion = result.protocolVersion;
-    await this.request('notifications/initialized', undefined, { notification: true });
+    await this.request('notifications/initialized', undefined, { notification: true, signal });
     this.initialized = true;
     return this;
   }
@@ -124,13 +176,28 @@ export class McpClient {
     return this.request('tools/list', {});
   }
 
-  async callTool(name, args = {}) {
-    await this.connect();
-    const result = await this.request('tools/call', { name, arguments: args });
-    if (result?.isError) {
-      throw new Error(`Hyperagent tool ${name} failed: ${contentText(result) || 'unknown error'}`);
+  async callTool(name, args = {}, { signal, timeoutMs } = {}) {
+    const bounded = boundedSignal(signal, timeoutMs || this.config.mcpRequestTimeoutMs);
+    try {
+      try {
+        await this.connect({ signal: bounded.signal });
+      } catch (error) {
+        if (name === 'create_thread') error.dispatchState = 'not_dispatched';
+        throw error;
+      }
+      const result = await this.request('tools/call', { name, arguments: args }, {
+        signal: bounded.signal,
+        timeoutMs: timeoutMs || this.config.mcpRequestTimeoutMs
+      });
+      if (result?.isError) {
+        const error = new Error(`Hyperagent tool ${name} failed.`);
+        error.dispatchState = 'dispatched';
+        throw error;
+      }
+      return result;
+    } finally {
+      bounded.cleanup();
     }
-    return result;
   }
 
   async close() {

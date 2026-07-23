@@ -56,10 +56,10 @@ function validateOAuthUrl(value, label, issuerOrigin) {
   return url;
 }
 
-export async function discoverOAuth(config) {
+export async function discoverOAuth(config, { signal } = {}) {
   const configuredIssuer = validateOAuthUrl(config.issuer, 'configured issuer');
   const resourceUrl = new URL('/.well-known/oauth-protected-resource', configuredIssuer).toString();
-  const resource = await getJson(resourceUrl);
+  const resource = await getJson(resourceUrl, { signal });
   if (resource.resource && new URL(resource.resource).toString() !== new URL(config.mcpUrl).toString()) {
     throw new Error(`OAuth protected resource mismatch: expected ${config.mcpUrl}, got ${resource.resource}.`);
   }
@@ -70,7 +70,7 @@ export async function discoverOAuth(config) {
   }
   const issuer = issuerUrl.toString().replace(/\/$/, '');
   const metadataUrl = new URL('/.well-known/oauth-authorization-server', issuer).toString();
-  const metadata = await getJson(metadataUrl);
+  const metadata = await getJson(metadataUrl, { signal });
   if (metadata.issuer && new URL(metadata.issuer).toString().replace(/\/$/, '') !== issuer) {
     throw new Error(`OAuth metadata issuer mismatch: expected ${issuer}, got ${metadata.issuer}.`);
   }
@@ -84,7 +84,7 @@ function callbackUrl(config) {
   return `http://${config.callbackHost}:${config.callbackPort}/callback`;
 }
 
-async function ensureClient(config, discovered) {
+async function ensureClient(config, discovered, { signal } = {}) {
   const state = await loadState();
   state.oauth ||= {};
   state.oauth.clients ||= {};
@@ -99,6 +99,7 @@ async function ensureClient(config, discovered) {
 
   const client = await getJson(registrationEndpoint, {
     method: 'POST',
+    signal,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       client_name: `Hyperagent Codex Bridge ${VERSION}`,
@@ -193,9 +194,10 @@ function startCallbackServer(config, expectedState, timeoutMs = 10 * 60 * 1000) 
   return { ready, result };
 }
 
-async function tokenRequest(metadata, params) {
+async function tokenRequest(metadata, params, { signal } = {}) {
   const response = await fetch(metadata.token_endpoint, {
     method: 'POST',
+    signal,
     headers: {
       accept: 'application/json',
       'content-type': 'application/x-www-form-urlencoded'
@@ -261,7 +263,7 @@ export async function login(config, { launchBrowser = true } = {}) {
   return { issuer: discovered.issuer, scopes: tokens.scope || config.scopes.join(' ') };
 }
 
-async function refresh(config, discovered, client, current) {
+async function refresh(config, discovered, client, current, { signal } = {}) {
   if (!current?.refresh_token) throw new Error('Hyperagent login expired and no refresh token is available. Run hacb login.');
   const updated = await tokenRequest(discovered.metadata, {
     grant_type: 'refresh_token',
@@ -269,7 +271,7 @@ async function refresh(config, discovered, client, current) {
     refresh_token: current.refresh_token,
     scope: config.scopes.join(' '),
     resource: config.mcpUrl
-  });
+  }, { signal });
   if (!updated.refresh_token) updated.refresh_token = current.refresh_token;
   const state = await loadState();
   state.oauth ||= {};
@@ -279,9 +281,9 @@ async function refresh(config, discovered, client, current) {
   return updated;
 }
 
-export async function getAccessToken(config, { require = true } = {}) {
-  const discovered = await discoverOAuth(config);
-  const client = await ensureClient(config, discovered);
+export async function getAccessToken(config, { require = true, signal } = {}) {
+  const discovered = await discoverOAuth(config, { signal });
+  const client = await ensureClient(config, discovered, { signal });
   const state = await loadState();
   const current = state.oauth?.tokens?.[discovered.issuer];
   if (!current?.access_token) {
@@ -289,7 +291,7 @@ export async function getAccessToken(config, { require = true } = {}) {
     throw new Error('Hyperagent is not connected. Run hacb login.');
   }
   if (current.expires_at && current.expires_at <= Date.now() + 60_000) {
-    return (await refresh(config, discovered, client, current)).access_token;
+    return (await refresh(config, discovered, client, current, { signal })).access_token;
   }
   return current.access_token;
 }

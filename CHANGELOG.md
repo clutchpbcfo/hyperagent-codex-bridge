@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Stop emitting authoritative-looking zero token usage when Hyperagent MCP does not report token counts.
+- Add request IDs, bounded durable local `Idempotency-Key` replay/conflict handling, and conservative cross-process duplicate prevention.
+- Propagate client disconnect cancellation through MCP polling and record that remote thread cancellation is unavailable.
+- Replace eager budget consumption with durable local reservation, commit-at-dispatch, and pre-dispatch release states.
+- Add secret-free structured gateway logs plus separate liveness and readiness probes.
+- Add loopback-only container/self-host guidance and mocked official OpenAI JavaScript/Python client fixtures.
+- Fail closed on unknown, duplicate, or ambiguous model identifiers; default omitted `stream` to SSE; and bound every create and polling request with an abortable timeout.
+
 ## 0.4.2 — 2026-07-22
 
 Release-hardening update focused on enforcing the cost controls claimed by v0.4.1.
