@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   AUTH_HEADERS,
   FAKE_AGENTS,
@@ -122,6 +126,7 @@ test('non-empty text SSE follows the exact profile order and correlation invaria
     });
     assert.equal(result.response.status, 200);
     assert.match(result.response.headers.get('content-type'), /^text\/event-stream/);
+    assert.equal(result.response.headers.get('x-usage-source'), 'unavailable');
     assert.deepEqual(result.events.map(item => item.event), [
       'response.created',
       'response.output_item.added',
@@ -234,6 +239,7 @@ test('non-streaming success returns one response object with usage omitted', asy
     assert.equal(body.output.length, 1);
     assertUsageOmitted(body);
     assert.equal(body.metadata.hyperagent_thread_id, response.headers.get('x-hyperagent-thread-id'));
+    assert.equal(response.headers.get('x-usage-source'), 'unavailable');
   });
 });
 
@@ -323,7 +329,7 @@ test('sanitized prompt ceiling fails with JSON 413 before thread creation', asyn
   });
 });
 
-test('Idempotency-Key durably replays the completed local response without a second thread', async () => {
+test('Idempotency-Key replays the completed local response without a second thread', async () => {
   const upstream = new FakeHyperagentUpstream({
     scenarios: [
       { kind: 'reply', text: '{"type":"final","text":"first"}' },
@@ -346,6 +352,49 @@ test('Idempotency-Key durably replays the completed local response without a sec
     assert.equal(secondResponse.headers.get('x-idempotency-replayed'), 'true');
     assert.equal(upstream.created.length, 1);
   });
+});
+
+test('completed idempotency records replay from protected local state after restart', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hacb-contract-idempotency-'));
+  const previousHome = process.env.HACB_HOME;
+  process.env.HACB_HOME = home;
+  const request = { model: 'hyperagent/sol-coder', input: 'durable replay', stream: false };
+  const headers = { 'idempotency-key': 'durable-contract-key' };
+  let first;
+  try {
+    const firstUpstream = new FakeHyperagentUpstream({
+      scenarios: [{ kind: 'reply', text: '{"type":"final","text":"persisted"}' }]
+    });
+    const firstTarget = await startContractTarget({ upstream: firstUpstream, durableIdempotency: true });
+    try {
+      const response = await postResponse(firstTarget.baseUrl, request, { headers });
+      first = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(firstUpstream.created.length, 1);
+    } finally {
+      await firstTarget.close();
+    }
+
+    const secondUpstream = new FakeHyperagentUpstream({
+      scenarios: [{ kind: 'reply', text: '{"type":"final","text":"must not dispatch"}' }]
+    });
+    const secondTarget = await startContractTarget({ upstream: secondUpstream, durableIdempotency: true });
+    try {
+      const response = await postResponse(secondTarget.baseUrl, request, { headers });
+      const replay = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('x-idempotency-replayed'), 'true');
+      assert.equal(replay.id, first.id);
+      assert.equal(replay.metadata.request_id, first.metadata.request_id);
+      assert.equal(secondUpstream.created.length, 0);
+    } finally {
+      await secondTarget.close();
+    }
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.HACB_HOME;
+    else process.env.HACB_HOME = previousHome;
+  }
 });
 
 test('function, custom, tool-search, and namespaced tools retain declaration order in the relay contract', async () => {
@@ -411,21 +460,36 @@ test('Idempotency-Key conflicts fail closed and each HTTP attempt gets a fresh r
 
 test('client abort stops local waiting but does not invoke an upstream cancellation capability', async () => {
   const upstream = new FakeHyperagentUpstream({ scenarios: [{ kind: 'pending' }] });
-  await withTarget({ upstream }, async ({ baseUrl }) => {
-    const controller = new AbortController();
-    const response = await postResponse(baseUrl, {
+  await withTarget({ upstream }, async ({ baseUrl, audits }) => {
+    const payload = JSON.stringify({
       model: 'hyperagent/sol-coder',
       input: 'wait',
       stream: true
-    }, { signal: controller.signal });
-    assert.equal(response.status, 200);
-    const bodyRead = response.text();
+    });
+    const response = await new Promise((resolve, reject) => {
+      const request = httpRequest(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          ...AUTH_HEADERS,
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
+      }, resolve);
+      request.on('error', reject);
+      request.end(payload);
+    });
+    assert.equal(response.statusCode, 200);
     await upstream.waitStarted.promise;
-    controller.abort();
-    await assert.rejects(bodyRead, error => error?.name === 'AbortError');
+    response.destroy();
     const observed = await upstream.waitAborted.promise;
     assert.equal(observed.threadId, upstream.created[0].threadId);
     assert.equal(typeof upstream.cancelThread, 'undefined');
+    for (let attempt = 0; attempt < 20 && !audits.some(item => item.event === 'cancelled'); attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    const receipt = audits.find(item => item.event === 'cancelled');
+    assert.equal(receipt.dispatched, true);
+    assert.equal(receipt.cancellationScope, 'local_polling_only');
   });
 });
 

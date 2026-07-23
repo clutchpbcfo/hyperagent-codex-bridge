@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-07-22
-- Gateway baseline: stacked PR #4 at `7299c5de30a5aea6df2c7f8cfdcdf6f70f84528f`
+- Gateway baseline: merged PR #4 at `ad1580a5379eed69cc919271932ee082b8c3df88`
 - Release tag: `v0.4.2` at `4e1372e3ad514aa4e438628a9e6af0588f6025a6`
 - Decision owners: Hyperagent Codex Bridge maintainers
 
@@ -141,7 +141,7 @@ If the client disconnects or aborts while waiting:
 
 1. the adapter aborts its local polling wait;
 2. the SSE/HTTP response ends without a guaranteed terminal event because the peer is gone;
-3. the adapter records a sanitized failed audit event; and
+3. the adapter records a sanitized `cancelled` audit event with `cancellationScope = local_polling_only`; and
 4. the already-created HyperAgent thread is not cancelled through MCP.
 
 OAuth/MCP setup, `create_thread`, each polling request, response-body reads, and the overall wait use abort signals and hard local time bounds. A timeout stops local work and reports a sanitized failure, but this contract cannot promise that native work stopped. The documented HyperAgent MCP tool list cited below has no cancellation operation.

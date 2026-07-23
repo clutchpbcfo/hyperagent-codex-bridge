@@ -14,10 +14,13 @@ test('OpenAPI document is valid JSON and declares the narrow 3.1 proof surface',
   assert.equal(document['x-compatibility']['full-openai-responses-api'], false);
   assert.equal(document['x-compatibility']['response-cancellation'], false);
   assert.equal(document['x-compatibility']['idempotency'], 'bounded-durable-local-only');
+  assert.equal(document['x-compatibility']['ambiguous-dispatch-reconciliation'], 'local-fail-closed-no-upstream-lookup');
+  assert.equal(document['x-compatibility']['disconnect-after-dispatch'], 'local-polling-aborted-native-work-unknown');
   assert.equal(document['x-compatibility']['usage-values'], 'omitted-not-reported');
   assert.equal(document['x-compatibility']['response-incomplete'], false);
   assert.equal(operation['x-hyperagent-upstream'].endpoint, 'https://hyperagent.com/api/mcp');
   assert.deepEqual(operation['x-hyperagent-upstream'].tools, ['list_agents', 'create_thread', 'get_thread']);
+  assert.equal(operation['x-hyperagent-upstream']['provider-idempotency-claimed'], false);
 });
 
 test('OpenAPI response and error schemas retain required contract fields', async () => {

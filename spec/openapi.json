@@ -128,6 +128,7 @@
           ],
           "native-token-streaming": false,
           "native-cancellation-claimed": false,
+          "provider-idempotency-claimed": false,
           "native-usage-or-billing-claimed": false
         }
       }
@@ -644,6 +645,8 @@
     "response-retrieval": false,
     "response-cancellation": false,
     "idempotency": "bounded-durable-local-only",
+    "ambiguous-dispatch-reconciliation": "local-fail-closed-no-upstream-lookup",
+    "disconnect-after-dispatch": "local-polling-aborted-native-work-unknown",
     "response-incomplete": false,
     "usage-values": "omitted-not-reported",
     "streaming-source": "adapter-framed-after-upstream-completion"

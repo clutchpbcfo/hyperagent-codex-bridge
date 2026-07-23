@@ -63,7 +63,7 @@ export class FakeHyperagentUpstream {
         return new Promise((resolve, reject) => {
           const abort = () => {
             this.waitAborted.resolve({ threadId });
-            reject(new Error('Request aborted.'));
+            reject(signal?.reason || new Error('Request aborted.'));
           };
           if (signal?.aborted) abort();
           else signal?.addEventListener('abort', abort, { once: true });
@@ -84,11 +84,12 @@ export class FakeHyperagentUpstream {
 export async function startContractTarget({
   upstream = new FakeHyperagentUpstream(),
   config: overrides = {},
-  budgetGuard = async () => ({ used: 1, limit: 6, remaining: 5 })
+  budgetGuard = async () => ({ used: 1, committed: 1, reserved: 0, limit: 6, remaining: 5 }),
+  durableIdempotency = false
 } = {}) {
   const audits = [];
   const logs = [];
-  const idempotencyManager = createMemoryIdempotencyManager();
+  const idempotencyManager = durableIdempotency ? null : createMemoryIdempotencyManager();
   const config = {
     bridgeHost: '127.0.0.1',
     bridgePort: 0,
@@ -105,13 +106,14 @@ export async function startContractTarget({
     maxPromptChars: 70_000,
     ...overrides
   };
-  const bridge = new BridgeServer(config, {
+  const bridgeOptions = {
     clientFactory: upstream.clientFactory,
     auditWriter: async event => audits.push(event),
     logWriter: async event => logs.push(event),
-    budgetGuard,
-    idempotencyManager
-  });
+    budgetGuard
+  };
+  if (idempotencyManager) bridgeOptions.idempotencyManager = idempotencyManager;
+  const bridge = new BridgeServer(config, bridgeOptions);
   await bridge.start();
   const address = bridge.server.address();
   return {
