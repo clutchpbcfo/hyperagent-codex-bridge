@@ -249,9 +249,13 @@ function normalizeTools(tools, config = {}) {
   };
   for (const tool of tools) {
     if (tool?.type === 'namespace' && Array.isArray(tool.tools)) {
+      for (const child of tool.tools) {
+        if (child?.type !== 'function') {
+          throw selectionError('Tool namespaces may contain function tools only.', 'invalid_request');
+        }
+      }
       if (blockedTool(tool.name || '', config)) continue;
       for (const child of tool.tools) {
-        if (child?.type !== 'function') continue;
         const name = namespaceToolName(tool.name, child.name);
         add({
           type: 'function',

@@ -1,0 +1,663 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hyperagent Codex Bridge Responses compatibility profile",
+    "version": "0.4.2-contract.1",
+    "description": "Normative loopback-adapter contract for POST /v1/responses. This is a deliberately narrow compatibility profile, not the complete OpenAI Responses API and not a native HyperAgent API.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "http://127.0.0.1:47831",
+      "description": "Default loopback listener; deployment beyond loopback is out of contract."
+    }
+  ],
+  "paths": {
+    "/v1/responses": {
+      "post": {
+        "operationId": "createAdapterResponse",
+        "summary": "Run one Responses-shaped sampling turn through a named HyperAgent agent",
+        "description": "Validates a local bearer token, resolves model fail closed, coordinates bounded durable local idempotency, creates one documented MCP thread, polls it, and maps one final relay action. stream defaults to true. No durable provider-side Response resource is created.",
+        "security": [
+          {
+            "LocalBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[!-~]+$"
+            },
+            "description": "Hashed into a permission-restricted local journal. Same-key completed requests replay locally; changed bodies, concurrent work, and indeterminate dispatches return 409. Retention is bounded and no provider-side idempotency is claimed.",
+            "x-idempotency-semantics": "bounded-durable-local"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateResponseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A completed non-streaming response, or an SSE stream whose terminal event is response.completed or response.failed.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "X-Hyperagent-Thread-Id": {
+                "required": true,
+                "description": "HyperAgent trace ID returned after documented MCP create_thread. It is not the adapter Response ID.",
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "X-Usage-Source": {
+                "$ref": "#/components/headers/UsageSource"
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletedResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "text/event-stream"
+                },
+                "examples": {
+                  "text": {
+                    "summary": "Ordered text response event names",
+                    "value": "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_example\",\"status\":\"in_progress\",\"model\":\"hyperagent/sol-coder\",\"output\":[],\"metadata\":{\"hyperagent_thread_id\":\"thread_example\",\"request_id\":\"req_example\",\"usage_source\":\"unavailable\"}}}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"msg_example\",\"content\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_example\",\"delta\":\"ok\"}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"msg_example\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_example\",\"status\":\"completed\",\"model\":\"hyperagent/sol-coder\",\"metadata\":{\"hyperagent_thread_id\":\"thread_example\",\"request_id\":\"req_example\",\"usage_source\":\"unavailable\"}}}\n\n"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/BudgetExceeded"
+          },
+          "409": {
+            "$ref": "#/components/responses/IdempotencyConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "504": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        },
+        "x-hyperagent-upstream": {
+          "transport": "OAuth-authenticated HTTP MCP",
+          "endpoint": "https://hyperagent.com/api/mcp",
+          "tools": [
+            "list_agents",
+            "create_thread",
+            "get_thread"
+          ],
+          "native-token-streaming": false,
+          "native-cancellation-claimed": false,
+          "provider-idempotency-claimed": false,
+          "native-usage-or-billing-claimed": false
+        }
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "RequestId": {
+        "required": true,
+        "description": "Fresh adapter-generated identifier for this HTTP attempt. Client-supplied values are ignored; replayed bodies retain the originating ID in metadata.request_id.",
+        "schema": {
+          "type": "string",
+          "pattern": "^req_[A-Za-z0-9]+$"
+        }
+      },
+      "UsageSource": {
+        "required": true,
+        "description": "Truthful usage provenance for successful responses. The documented HyperAgent MCP tools do not report authoritative usage, so this profile always returns unavailable and omits the response usage object.",
+        "schema": {
+          "type": "string",
+          "const": "unavailable"
+        }
+      }
+    },
+    "securitySchemes": {
+      "LocalBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque local loopback token",
+        "description": "Adapter-local secret. It is neither an OpenAI API key nor a HyperAgent OAuth token and is never forwarded upstream."
+      }
+    },
+    "schemas": {
+      "CreateResponseRequest": {
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact adapter routing identifier: configured alias, generated hyperagent/<slug>, reachable agent ID, or case-sensitive agent name. Unknown, duplicate, or ambiguous identifiers fail closed; defaultAgentId is never a fallback."
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InputItem"
+                }
+              }
+            ],
+            "description": "Text-first input. Unsupported item shapes may be ignored during adapter sanitization and are not claimed as compatible features."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/FunctionTool" },
+                { "$ref": "#/components/schemas/CustomTool" },
+                { "$ref": "#/components/schemas/ToolSearchTool" },
+                { "$ref": "#/components/schemas/ToolNamespace" }
+              ]
+            },
+            "description": "Client-owned function, custom, or tool_search descriptions. Tools run in Codex, not in the adapter or HyperAgent."
+          },
+          "stream": {
+            "type": "boolean",
+            "default": true,
+            "description": "Only false selects a non-streaming JSON response."
+          },
+          "reasoning": {
+            "type": "object",
+            "properties": {
+              "effort": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true,
+            "description": "Ignored unless the local operator explicitly enables client reasoning effort. Native agent effort remains HyperAgent-owned."
+          }
+        },
+        "additionalProperties": true
+      },
+      "FunctionTool": {
+        "type": "object",
+        "required": ["type", "name"],
+        "properties": {
+          "type": { "const": "function" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "parameters": { "type": "object", "additionalProperties": true },
+          "strict": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      },
+      "CustomTool": {
+        "type": "object",
+        "required": ["type", "name"],
+        "properties": {
+          "type": { "const": "custom" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "format": {}
+        },
+        "additionalProperties": true
+      },
+      "ToolSearchTool": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "const": "tool_search" },
+          "description": { "type": "string" },
+          "execution": { "const": "client" }
+        },
+        "additionalProperties": true
+      },
+      "ToolNamespace": {
+        "type": "object",
+        "description": "Client tool namespace whose children are function tools only. Custom and tool-search tools must be declared at the top level; non-function namespace children are rejected.",
+        "required": ["type", "name", "tools"],
+        "properties": {
+          "type": { "const": "namespace" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FunctionTool"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "InputItem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "content": {},
+          "call_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {},
+          "input": {},
+          "output": {},
+          "tools": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/FunctionTool" },
+                { "$ref": "#/components/schemas/CustomTool" },
+                { "$ref": "#/components/schemas/ToolSearchTool" },
+                { "$ref": "#/components/schemas/ToolNamespace" }
+              ]
+            },
+            "description": "Used when type is additional_tools or tool_search_output. Namespace contents are flattened in declaration order."
+          }
+        },
+        "additionalProperties": true
+      },
+      "ResponseMetadata": {
+        "type": "object",
+        "required": [
+          "hyperagent_thread_id",
+          "request_id",
+          "usage_source"
+        ],
+        "properties": {
+          "hyperagent_thread_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^req_[A-Za-z0-9]+$"
+          },
+          "usage_source": {
+            "const": "unavailable"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OutputTextPart": {
+        "type": "object",
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "type": {
+            "const": "output_text"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MessageOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "role",
+          "id",
+          "content"
+        ],
+        "properties": {
+          "type": {
+            "const": "message"
+          },
+          "role": {
+            "const": "assistant"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^msg_[A-Za-z0-9]+$"
+          },
+          "content": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "$ref": "#/components/schemas/OutputTextPart"
+              }
+            ],
+            "minItems": 1,
+            "maxItems": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "FunctionCallOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "const": "function_call"
+          },
+          "call_id": {
+            "type": "string",
+            "pattern": "^call_[A-Za-z0-9]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string",
+            "contentMediaType": "application/json"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CustomToolCallOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "name",
+          "input"
+        ],
+        "properties": {
+          "type": {
+            "const": "custom_tool_call"
+          },
+          "call_id": {
+            "type": "string",
+            "pattern": "^call_[A-Za-z0-9]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ToolSearchCallOutput": {
+        "type": "object",
+        "required": [
+          "type",
+          "call_id",
+          "status",
+          "execution",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "const": "tool_search_call"
+          },
+          "call_id": {
+            "type": "string",
+            "pattern": "^call_[A-Za-z0-9]+$"
+          },
+          "status": {
+            "const": "completed"
+          },
+          "execution": {
+            "const": "client"
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "OutputItem": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MessageOutput"
+          },
+          {
+            "$ref": "#/components/schemas/FunctionCallOutput"
+          },
+          {
+            "$ref": "#/components/schemas/CustomToolCallOutput"
+          },
+          {
+            "$ref": "#/components/schemas/ToolSearchCallOutput"
+          }
+        ]
+      },
+      "CompletedResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "status",
+          "model",
+          "output",
+          "metadata"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^resp_[A-Za-z0-9]+$"
+          },
+          "object": {
+            "const": "response"
+          },
+          "status": {
+            "const": "completed"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutputItem"
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ResponseMetadata"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "message",
+              "type",
+              "code"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "invalid_request_error",
+                  "server_error"
+                ]
+              },
+              "code": {
+                "enum": [
+                  "ambiguous_agent_slug",
+                  "ambiguous_model_alias",
+                  "budget_exhausted",
+                  "budget_lock_unavailable",
+                  "budget_reservation_invalid",
+                  "client_disconnected",
+                  "duplicate_agent_identifier",
+                  "duplicate_agent_name",
+                  "hyperagent_bridge_error",
+                  "idempotency_conflict",
+                  "idempotency_in_progress",
+                  "idempotency_indeterminate",
+                  "idempotency_lock_unavailable",
+                  "idempotency_state_invalid",
+                  "invalid_agent_catalog",
+                  "invalid_idempotency_key",
+                  "invalid_model_alias",
+                  "invalid_request",
+                  "model_required",
+                  "prompt_too_large",
+                  "request_too_large",
+                  "unauthorized",
+                  "unknown_model",
+                  "upstream_timeout"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed JSON, missing model, or an unresolved/unavailable model or alias.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/RequestId" } },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid adapter-local bearer token.",
+        "headers": {
+          "X-Request-Id": { "$ref": "#/components/headers/RequestId" },
+          "WWW-Authenticate": {
+            "schema": {
+              "const": "Bearer realm=\"hyperagent-codex-bridge\""
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "Received JSON exceeds 8 MiB or the sanitized relay prompt exceeds the configured ceiling.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/RequestId" } },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            }
+          }
+        }
+      },
+      "BudgetExceeded": {
+        "description": "The persistent adapter-local daily HyperAgent request cap was reached.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/RequestId" } },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            }
+          }
+        }
+      },
+      "IdempotencyConflict": {
+        "description": "The local key conflicts with another body, is in progress, or has an indeterminate upstream outcome.",
+        "headers": {
+          "X-Request-Id": { "$ref": "#/components/headers/RequestId" },
+          "Retry-After": {
+            "schema": { "type": "string" },
+            "description": "Present for in-progress and indeterminate outcomes."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorBody" }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "Adapter or upstream failure before SSE headers were committed.",
+        "headers": { "X-Request-Id": { "$ref": "#/components/headers/RequestId" } },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBody"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-compatibility": {
+    "profile": "hacb-responses-v0.4.2",
+    "full-openai-responses-api": false,
+    "durable-response-resource": false,
+    "response-retrieval": false,
+    "response-cancellation": false,
+    "idempotency": "bounded-durable-local-only",
+    "ambiguous-dispatch-reconciliation": "local-fail-closed-no-upstream-lookup",
+    "disconnect-after-dispatch": "local-polling-aborted-native-work-unknown",
+    "response-incomplete": false,
+    "usage-values": "omitted-not-reported",
+    "streaming-source": "adapter-framed-after-upstream-completion"
+  }
+}

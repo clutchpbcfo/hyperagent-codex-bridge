@@ -30,6 +30,8 @@ The repository test suite covers:
 - agent discovery and stable model slug generation;
 - Codex model catalog generation;
 - Responses streaming and non-streaming output;
+- the versioned OpenAPI 3.1 document and exact SSE event order;
+- local auth, model/agent selection, JSON/SSE errors, identifier, idempotency, cancellation, and usage semantics through black-box fake-upstream conformance tests;
 - function/custom-tool mapping;
 - a real Codex CLI provider run;
 - a real Codex local shell-tool round trip;
@@ -60,12 +62,16 @@ hacb audit 12
 A successful request produces a sequence like:
 
 ```text
-request  hyperagent/codex-relay-sol
-thread_created  hyperagent/codex-relay-sol  <hyperagent-thread-id>
-completed  hyperagent/codex-relay-sol  <hyperagent-thread-id>  final
+2026-07-22T00:00:00.000Z  request_reserved  req_example  hyperagent/codex-relay-sol  agent_<hash>  reservation_<hash>  promptChars=1234  daily=1/6
+2026-07-22T00:00:00.100Z  thread_created  req_example  hyperagent/codex-relay-sol  agent_<hash>  thread_<hash>
+2026-07-22T00:00:01.000Z  completed  req_example  hyperagent/codex-relay-sol  agent_<hash>  thread_<hash>  final
 ```
 
-The audit file never stores prompts, outputs, OAuth tokens, refresh tokens, or the local bridge bearer token.
+This is a shape example, not a live receipt. Current audit output uses adapter-generated request IDs and hashed agent, thread, and reservation references. The audit file never stores prompts, outputs, OAuth tokens, refresh tokens, the local bridge bearer token, or raw private operational IDs.
+
+## Contract refresh receipt
+
+The public contract and conformance suite are refreshed against merged gateway baseline `ad1580a5379eed69cc919271932ee082b8c3df88`. The refresh uses fake/local upstreams only. It verifies durable completed-response replay across a gateway restart, fail-closed ambiguous dispatches, local-only disconnect cancellation, and omission of unreported usage. It does not constitute a HyperAgent billing, native cancellation, or provider-idempotency receipt.
 
 ## Security design
 

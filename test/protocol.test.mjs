@@ -89,6 +89,21 @@ test('additional_tools and MCP namespaces are flattened while multi-agent tools 
   );
 });
 
+test('namespaces reject non-function children instead of silently omitting them', () => {
+  assert.throws(
+    () => extractClientTools({
+      tools: [{
+        type: 'namespace',
+        name: 'invalid',
+        tools: [{ type: 'custom', name: 'silently_dropped_before' }]
+      }]
+    }),
+    error => error.status === 400
+      && error.code === 'invalid_request'
+      && /function tools only/.test(error.message)
+  );
+});
+
 test('relay output maps final and tool calls', () => {
   assert.deepEqual(parseRelayOutput('{"type":"final","text":"done"}'), { type: 'final', text: 'done' });
   assert.deepEqual(
