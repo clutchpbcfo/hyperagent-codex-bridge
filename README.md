@@ -27,7 +27,7 @@ The bridge maps Codex function/custom-tool calls back to Codex, so shell command
 
 ## Public Responses contract
 
-The v0.4.2 adapter's intentionally narrow public contract is executable and source-controlled:
+The v0.5.0 adapter's intentionally narrow public contract is executable and source-controlled:
 
 - [`docs/adr/0001-public-responses-contract.md`](docs/adr/0001-public-responses-contract.md) defines auth, agent selection, errors, identifiers, idempotency, cancellation, usage, billing, and ownership boundaries;
 - [`spec/openapi.json`](spec/openapi.json) is the OpenAPI 3.1 description for `POST /v1/responses`;
@@ -38,7 +38,7 @@ This is a Responses compatibility profile, not the complete OpenAI Responses API
 
 ## Proof of work
 
-Release 0.4.0 is validated by an automated suite plus real Codex 0.144.6:
+The bridge is validated by an automated suite plus real Codex 0.144.6:
 
 - OAuth discovery, PKCE, refresh-token rotation, and MCP session handling;
 - Codex Responses SSE compatibility;
@@ -49,6 +49,8 @@ Release 0.4.0 is validated by an automated suite plus real Codex 0.144.6:
 - secret scan and archive integrity checks.
 
 The public proof target is `hacb audit`: each successful turn produces model and hashed agent/thread references without storing prompts, answers, credentials, or raw private identifiers.
+
+The v0.5.0 evidence set is source-controlled in [`docs/PROOF_PACKAGE_2026-07-23.md`](docs/PROOF_PACKAGE_2026-07-23.md). Release notes and the publication-ready article are in [`docs/RELEASE_NOTES_0.5.0.md`](docs/RELEASE_NOTES_0.5.0.md) and [`docs/X_ARTICLE_2026-07-23.md`](docs/X_ARTICLE_2026-07-23.md).
 
 ## Public release
 

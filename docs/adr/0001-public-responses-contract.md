@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-07-22
 - Gateway baseline: merged PR #4 at `ad1580a5379eed69cc919271932ee082b8c3df88`
-- Release tag: `v0.4.2` at `4e1372e3ad514aa4e438628a9e6af0588f6025a6`
+- Release line: `v0.5.0`. The immutable release commit and checksums are recorded in the GitHub release.
 - Decision owners: Hyperagent Codex Bridge maintainers
 
 ## Context
@@ -156,7 +156,7 @@ Successful JSON responses and `response.completed` events omit `usage`. Omission
 
 The adapter emits a small ordered subset of Responses-style events sufficient for its Codex provider integration. It does not claim full conformance with every event and field in the OpenAI Responses API. Notably, current events omit `sequence_number`, and text output does not emit the full content-part lifecycle shown by the OpenAI reference.
 
-This limitation is intentional in this ADR: the executable suite freezes the behavior that exists at the v0.4.2 baseline. Expanding the event grammar requires a separately reviewed gateway change and updated contract tests.
+This limitation is intentional in this ADR: the executable suite freezes the behavior that exists at the v0.5.0 baseline. Expanding the event grammar requires a separately reviewed gateway change and updated contract tests.
 
 `response.incomplete` and `status = incomplete` are unsupported and are never emitted by this profile. A future implementation must define incomplete details, terminal ordering, and retry semantics before adding them.
 

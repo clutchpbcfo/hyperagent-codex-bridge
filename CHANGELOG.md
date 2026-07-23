@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-07-23
 
 - Stop emitting authoritative-looking zero token usage when Hyperagent MCP does not report token counts.
 - Add request IDs, bounded durable local `Idempotency-Key` replay/conflict handling, and conservative cross-process duplicate prevention.
@@ -9,6 +9,8 @@
 - Add secret-free structured gateway logs plus separate liveness and readiness probes.
 - Add loopback-only container/self-host guidance and mocked official OpenAI JavaScript/Python client fixtures.
 - Fail closed on unknown, duplicate, or ambiguous model identifiers; default omitted `stream` to SSE; and bound every create and polling request with an abortable timeout.
+- Publish the executable OpenAPI 3.1 and SSE compatibility contract with black-box conformance tests.
+- Verify the official OpenAI JavaScript client against the local gateway profile.
 
 ## 0.4.2 — 2026-07-22
 
