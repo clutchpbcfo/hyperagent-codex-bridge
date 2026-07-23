@@ -212,10 +212,22 @@ async function withFileLock(path, label, callback) {
   let handle;
   while (!handle) {
     try {
-      handle = await open(path, 'wx', 0o600);
-      await handle.writeFile(owner);
+      const candidate = await open(path, 'wx', 0o600);
+      try {
+        await candidate.writeFile(owner);
+        handle = candidate;
+      } catch (error) {
+        await candidate.close().catch(() => {});
+        await unlink(path).catch(() => {});
+        throw error;
+      }
     } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
+      // Node 20 on Windows can surface a sharing violation as EPERM while
+      // another process owns the exclusive-create lock file. Treat it as
+      // contention and let the normal bounded, fail-closed loop decide.
+      if (error?.code !== 'EEXIST' && !(process.platform === 'win32' && error?.code === 'EPERM')) {
+        throw error;
+      }
       const observed = await Promise.all([
         stat(path),
         readFile(path, 'utf8')
